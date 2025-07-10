@@ -1,0 +1,5 @@
+import std.io.println;
+
+def main() {
+    println("Hello World\n");
+}
