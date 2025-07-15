@@ -1,0 +1,1 @@
+def puts(*u8 format) i32;

@@ -1,11 +1,13 @@
 use crate::{
+    TokenKind,
     lexer::{Keyword, TokenKind::*, Value},
     parser::{
         L1Parser,
         error::{ParserError, Result},
         l1st::{
-            L1Arg, L1Block, L1Expression, L1ExpressionInner, L1Fn, L1Generic, L1Import,
-            L1Statement, L1Type, L1Value, L1Variable,
+            BinOp, L1Arg, L1Block, L1Expression, L1ExpressionInner, L1Fn, L1FnDeclr, L1Generic,
+            L1If, L1Import, L1ImportFragment, L1NamedExpr, L1Statement, L1Struct, L1Type, L1Value,
+            L1Variable, L1While,
         },
     },
 };
@@ -23,23 +25,83 @@ impl<'a> L1Parser<'a> {
         let fragment = self.match_iden()?;
 
         match self.peek()?.kind {
-            SemiColon => return Ok(L1Import {}),
-            Dot => {
-                self.match_token(SemiColon)?;
-                todo!()
+            SemiColon | CurlyBracesClose => {
+                // Do not consume the semicolon, its done by caller
+                return Ok(L1Import {
+                    fragment: L1ImportFragment::Path(fragment),
+                    nexts: None,
+                });
             }
-            _ => Err(ParserError::InvalidImport),
+            Comma => {
+                self.match_token(Comma)?;
+
+                Ok(L1Import {
+                    fragment: L1ImportFragment::Path(fragment),
+                    nexts: None,
+                })
+            }
+            Dot => {
+                self.match_token(Dot)?;
+
+                match self.peek()?.kind {
+                    Identifier(_) => {
+                        let imp = self.parse_import_path()?;
+
+                        Ok(L1Import {
+                            fragment: L1ImportFragment::Path(fragment),
+                            nexts: Some(vec![imp]),
+                        })
+                    }
+                    Star => {
+                        self.match_token(Star)?;
+
+                        Ok(L1Import {
+                            fragment: L1ImportFragment::Path(fragment),
+                            nexts: Some(vec![L1Import {
+                                fragment: L1ImportFragment::All,
+                                nexts: None,
+                            }]),
+                        })
+                    }
+                    CurlyBracesOpen => {
+                        self.match_token(CurlyBracesOpen)?;
+
+                        let mut imports = vec![];
+                        while self.peek()?.kind != CurlyBracesClose {
+                            let imp = self.parse_import_path()?;
+                            imports.push(imp);
+
+                            if self.peek()?.kind == Comma {
+                                self.match_token(Comma)?;
+                            }
+                        }
+
+                        self.match_token(CurlyBracesClose)?;
+
+                        Ok(L1Import {
+                            fragment: L1ImportFragment::Path(fragment),
+                            nexts: Some(imports),
+                        })
+                    }
+                    _ => Err(ParserError::InvalidImport),
+                }
+            }
+            ref k => {
+                dbg!(k);
+                Err(ParserError::InvalidImport)
+            }
         }
     }
 
     /// Parses the "def" keyword
-    /// It can parse functions, structs and variables.
+    /// It can parse (extern) functions, structs and (static) variables.
     pub fn parse_def(&mut self) -> Result<L1Statement> {
         self.match_keyword(Keyword::Def)?;
 
         let tok = self.peek()?;
         let mut generics = Vec::new();
         match tok.kind {
+            // def(T) is the syntax for generics
             BraceOpen => {
                 self.match_token(BraceOpen)?;
                 let generic = self.parse_generic()?;
@@ -53,6 +115,7 @@ impl<'a> L1Parser<'a> {
 
                 self.match_token(BraceClose)?;
             }
+            // No generics, type name
             Identifier(_) => {}
             // TODO: Provide generics hint
             _ => {
@@ -67,18 +130,34 @@ impl<'a> L1Parser<'a> {
 
         let tok = self.peek()?;
         match tok.kind {
+            // Is a function
             BraceOpen => {
                 self.match_token(BraceOpen)?;
-                let args = self.parse_args()?;
+                let args = self.parse_args(BraceClose)?;
                 self.match_token(BraceClose)?;
 
                 // TODO: parse the return type
                 let mut ret = L1Type::Void;
                 match self.peek()?.kind {
-                    CurlyBracesOpen => {}
+                    CurlyBracesOpen | SemiColon => {}
                     _ => {
                         ret = self.parse_type()?;
                     }
+                }
+
+                match self.peek()?.kind {
+                    // Function doesn't have a body (extern declaration)
+                    SemiColon => {
+                        self.match_token(SemiColon)?;
+
+                        return Ok(L1Statement::ExternFnDeclr(L1FnDeclr {
+                            name,
+                            generics,
+                            args,
+                            ret,
+                        }));
+                    }
+                    _ => {}
                 }
 
                 let block = self.parse_block()?;
@@ -91,8 +170,17 @@ impl<'a> L1Parser<'a> {
                     ret,
                 };
 
-                Ok(L1Statement::FnDeclr(func))
+                Ok(L1Statement::FnDef(func))
             }
+            // Is a struct
+            CurlyBracesOpen => {
+                self.match_token(CurlyBracesOpen)?;
+                let fields = self.parse_args(CurlyBracesClose)?;
+                self.match_token(CurlyBracesClose)?;
+
+                Ok(L1Statement::StructDef(L1Struct { name, fields }))
+            }
+            // Variable with type
             Colon => {
                 self.match_token(Colon)?;
 
@@ -127,6 +215,7 @@ impl<'a> L1Parser<'a> {
                     }
                 }
             }
+            // Variable without type
             Equals => {
                 self.match_token(Equals)?;
 
@@ -141,6 +230,7 @@ impl<'a> L1Parser<'a> {
                     value: Some(expr),
                 });
             }
+            // Variable without type or default value
             SemiColon => {
                 self.match_token(SemiColon)?;
 
@@ -218,9 +308,9 @@ impl<'a> L1Parser<'a> {
         Ok(L1Type::from(ty))
     }
 
-    fn parse_args(&mut self) -> Result<Vec<L1Arg>> {
-        match self.peek()?.kind {
-            BraceClose => Ok(Vec::new()),
+    fn parse_args(&mut self, close_token: TokenKind) -> Result<Vec<L1Arg>> {
+        match &self.peek()?.kind {
+            token if token == &close_token => Ok(Vec::new()),
             _ => {
                 let mut args = Vec::new();
                 let arg = self.parse_arg()?;
@@ -262,7 +352,7 @@ impl<'a> L1Parser<'a> {
         Ok(arg)
     }
 
-    // TODO: Do the Int and Float Parsing correctlt
+    // TODO: Do the Int and Float Parsing correctly
     fn parse_value(&mut self) -> Result<L1Value> {
         let tok = self.next().ok_or(ParserError::EOF)?;
         let val = match tok.kind {
@@ -309,15 +399,79 @@ impl<'a> L1Parser<'a> {
 
                     statement
                 }
+                Keyword::Return => {
+                    self.match_keyword(Keyword::Return)?;
+
+                    let expr = self.parse_expr()?;
+
+                    self.match_token(SemiColon)?;
+
+                    L1Statement::Return(expr)
+                }
+                Keyword::While => {
+                    let statement = self.parse_while()?;
+
+                    L1Statement::While(statement)
+                }
+                Keyword::If => {
+                    let statement = self.parse_if()?;
+
+                    L1Statement::If(statement)
+                }
                 _ => return Err(ParserError::InvalidStatement),
             },
-            BraceOpen => L1Statement::Exr(self.parse_expr()?),
             _ => {
-                return Err(ParserError::InvalidStatement);
+                let expr = self.parse_expr()?;
+                self.match_token(SemiColon)?;
+                L1Statement::Expr(expr)
             }
         };
 
         Ok(statement)
+    }
+
+    fn parse_while(&mut self) -> Result<L1While> {
+        self.match_keyword(Keyword::While)?;
+
+        let expr = self.parse_expr()?;
+
+        let block = self.parse_block()?;
+
+        Ok(L1While {
+            condition: expr,
+            body: block,
+        })
+    }
+
+    fn parse_if(&mut self) -> Result<L1If> {
+        self.match_keyword(Keyword::If)?;
+
+        let expr = self.parse_expr()?;
+
+        let if_block = self.parse_block()?;
+
+        let mut else_block = None;
+
+        match self.peek()?.kind {
+            Keyword(Keyword::Else) => match self.peek_2()?.kind {
+                Keyword(Keyword::If) => {
+                    // TODO: Parse "else if"
+                    todo!("Parse else if blocks")
+                }
+                _ => {
+                    self.match_keyword(Keyword::Else)?;
+                    else_block = Some(self.parse_block()?);
+                }
+            },
+            _ => {}
+        }
+
+        // TODO: Else if and else blocks
+        Ok(L1If {
+            if_cond: expr,
+            if_block: if_block,
+            else_block,
+        })
     }
 
     fn parse_expr(&mut self) -> Result<L1Expression> {
@@ -349,6 +503,7 @@ impl<'a> L1Parser<'a> {
                 self.next().unwrap();
 
                 L1Expression {
+                    // Unknown because Int can be word, dword, hword or byte
                     ty: L1Type::Unknown,
                     expr: L1ExpressionInner::Int(num),
                 }
@@ -364,6 +519,7 @@ impl<'a> L1Parser<'a> {
                 self.next().unwrap();
 
                 L1Expression {
+                    // Unknown cause Float can be f32 or f64
                     ty: L1Type::Unknown,
                     expr: L1ExpressionInner::Float(num),
                 }
@@ -378,11 +534,103 @@ impl<'a> L1Parser<'a> {
 
                 expr
             }
-            _ => {
-                todo!();
+            Identifier(_) => {
+                match self.peek_2()?.kind {
+                    // func()
+                    BraceOpen => {
+                        let call = self.parse_function_call()?;
+
+                        call
+                    }
+                    _ => {
+                        let iden = self.match_iden()?;
+                        L1Expression {
+                            ty: L1Type::Unknown,
+                            expr: L1ExpressionInner::Variable(iden),
+                        }
+                    }
+                }
             }
+            _ => return Err(ParserError::InvalidExpr),
         };
 
-        Ok(expr)
+        match self.peek()?.kind {
+            ref kind if BinOp::try_from(kind.clone()).is_ok() => {
+                let op = BinOp::try_from(kind.clone()).unwrap();
+
+                self.next();
+
+                let rhs = self.parse_expr()?;
+
+                Ok(L1Expression {
+                    ty: L1Type::Unknown,
+                    expr: L1ExpressionInner::BinOp {
+                        lhs: Box::new(expr),
+                        op,
+                        rhs: Box::new(rhs),
+                    },
+                })
+            }
+            _ => Ok(expr),
+        }
+    }
+
+    fn parse_function_call(&mut self) -> Result<L1Expression> {
+        let func = self.match_iden()?;
+        self.match_token(BraceOpen)?;
+
+        match self.peek()?.kind {
+            BraceClose => {
+                self.match_token(BraceClose)?;
+
+                Ok(L1Expression {
+                    ty: L1Type::Unknown,
+                    expr: L1ExpressionInner::FnCall {
+                        name: func,
+                        args: vec![],
+                    },
+                })
+            }
+            _ => {
+                let mut args = vec![self.parse_named_expr()?];
+
+                loop {
+                    match self.peek()?.kind {
+                        Comma => {
+                            self.match_token(Comma)?;
+                            args.push(self.parse_named_expr()?);
+                        }
+                        BraceClose => {
+                            self.match_token(BraceClose)?;
+                            break;
+                        }
+                        _ => return Err(ParserError::InvalidCall),
+                    }
+                }
+
+                Ok(L1Expression {
+                    ty: L1Type::Unknown,
+                    expr: L1ExpressionInner::FnCall { name: func, args },
+                })
+            }
+        }
+    }
+
+    fn parse_named_expr(&mut self) -> Result<L1NamedExpr> {
+        match self.peek()?.kind {
+            Identifier(_) if self.peek_2()?.kind == Equals => {
+                let name = self.match_iden()?;
+                self.match_token(Equals)?;
+                let expr = self.parse_expr()?;
+                Ok(L1NamedExpr {
+                    name: Some(name),
+                    expr,
+                })
+            }
+            _ => Ok(L1NamedExpr {
+                name: None,
+                expr: self.parse_expr()?,
+            }),
+        }
     }
 }

@@ -43,8 +43,17 @@ impl Compiler {
     }
 
     pub fn compile(&mut self) {
+        // Step 1: Tokenize
+        // Step 2: Parse tokens into initial parsing tree
+        // Step 3: Parse imports
+        // Step 3.5: Verify the order of default args
+        // Step 4: Backpatch types
+        // Step 5: Infer expression type
+        // Step 6: Type Checking
+
         let lxr = lexer::Lexer::new(&self.input);
         let tokens = lxr.tokenize();
+
         // There might be unknown tokens, handel them gracefully
         self.error_tokens(&tokens);
 

@@ -46,15 +46,25 @@ impl<'a> L1Parser<'a> {
                 let statement = self.parse_def()?;
 
                 match statement {
-                    L1Statement::FnDeclr(func) => self
+                    L1Statement::FnDef(func) => self
                         .ast
                         .funcs
                         .insert(func.name.clone(), l1st::Symbol::Fn(func)),
+                    L1Statement::ExternFnDeclr(func) => self
+                        .ast
+                        .fn_declerations
+                        .insert(func.name.clone(), l1st::Symbol::FnDeclr(func)),
+                    L1Statement::StructDef(strct) => self
+                        .ast
+                        .struct_defs
+                        .insert(strct.name.clone(), l1st::Symbol::Struct(strct)),
                     _ => unreachable!(),
                 };
             }
             TokenKind::Keyword(Keyword::Import) => {
                 let import = self.parse_import()?;
+
+                self.ast.imports.push(import);
             }
             _ => {
                 return Err(ParserError::UnexpectedToken);
@@ -84,6 +94,12 @@ impl<'a> L1Parser<'a> {
 
     fn peek(&self) -> Result<&Token<'a>> {
         self.tokens.get(self.current_tok).ok_or(ParserError::EOF)
+    }
+
+    fn peek_2(&self) -> Result<&Token<'a>> {
+        self.tokens
+            .get(self.current_tok + 1)
+            .ok_or(ParserError::EOF)
     }
 
     fn match_token(&mut self, kind: TokenKind) -> Result<&Token> {

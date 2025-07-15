@@ -20,9 +20,21 @@ pub enum ParserError {
     InvalidStatement,
     IntParseError,
     InvalidImport,
+    InvalidCall,
+    InvalidExpr,
+    InvalidBinOp,
 
     /// No  more tokens
     EOF,
+}
+
+#[derive(Debug)]
+pub struct ErrorState {}
+
+#[derive(Debug)]
+pub struct ParserErrorT {
+    parser_state: ErrorState,
+    ty: ParserError,
 }
 
 pub type Result<T> = std::result::Result<T, ParserError>;

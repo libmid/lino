@@ -26,6 +26,12 @@ pub enum TokenKind {
     Comma,
     /// "+"
     Plus,
+    /// "-"
+    Minus,
+    /// "/"
+    Slash,
+    /// "%"
+    Percent,
     /// "."
     Dot,
     /// ".."
@@ -36,8 +42,34 @@ pub enum TokenKind {
     Variadic,
     /// "="
     Equals,
+    /// "=="
+    DoubleEq,
     /// ";"
     SemiColon,
+    /// "!"
+    Not,
+    /// "!="
+    NotEq,
+
+    /// "&"
+    And,
+    /// "&&"
+    AndAnd,
+    /// "|"
+    Or,
+    /// "||"
+    OrOr,
+    /// "^"
+    Xor,
+    /// "<<"
+    Lsh,
+    /// ">>"
+    Rsh,
+
+    Gt,
+    Gte,
+    Lt,
+    Lte,
 
     /// This only exists for error reporting, in practice the parser doesn't encounter this
     Unknown,
@@ -54,12 +86,14 @@ pub enum Value {
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum Keyword {
-    /// The "def" keyword
     Def,
     /// true and false
     Bool(bool),
-    /// "import"
     Import,
+    While,
+    If,
+    Else,
+    Return,
 }
 
 #[derive(Debug)]
@@ -154,14 +188,98 @@ impl<'a> Lexer<'a> {
                     self.pos += 1;
                     Some(Plus)
                 }
-                '=' => {
+                '-' => {
                     self.pos += 1;
-                    Some(Equals)
+                    Some(Minus)
                 }
+                '=' => match second_char {
+                    Some('=') => {
+                        self.pos += 2;
+                        Some(DoubleEq)
+                    }
+                    _ => {
+                        self.pos += 1;
+                        Some(Equals)
+                    }
+                },
+                '!' => match second_char {
+                    Some('=') => {
+                        self.pos += 2;
+                        Some(NotEq)
+                    }
+                    _ => {
+                        self.pos += 1;
+                        Some(Not)
+                    }
+                },
                 ';' => {
                     self.pos += 1;
                     Some(SemiColon)
                 }
+                '%' => {
+                    self.pos += 1;
+                    Some(Percent)
+                }
+                '/' => {
+                    // TODO: Support for comments
+                    self.pos += 1;
+                    Some(Slash)
+                }
+                '&' => match second_char {
+                    Some('&') => {
+                        self.pos += 2;
+                        Some(AndAnd)
+                    }
+                    _ => {
+                        self.pos += 1;
+                        Some(And)
+                    }
+                },
+                '|' => match second_char {
+                    Some('|') => {
+                        self.pos += 2;
+                        Some(OrOr)
+                    }
+                    _ => {
+                        self.pos += 1;
+                        Some(Or)
+                    }
+                },
+                '^' => {
+                    self.pos += 1;
+                    Some(Xor)
+                }
+
+                '<' => match second_char {
+                    Some('=') => {
+                        self.pos += 2;
+                        Some(Lte)
+                    }
+                    Some('<') => {
+                        self.pos += 2;
+                        Some(Lsh)
+                    }
+                    _ => {
+                        self.pos += 1;
+                        Some(Lt)
+                    }
+                },
+
+                '>' => match second_char {
+                    Some('=') => {
+                        self.pos += 2;
+                        Some(Gte)
+                    }
+                    Some('>') => {
+                        self.pos += 2;
+                        Some(Rsh)
+                    }
+                    _ => {
+                        self.pos += 1;
+                        Some(Gt)
+                    }
+                },
+
                 '.' => match second_char {
                     Some('.') => match third_char {
                         Some('.') => {
@@ -202,27 +320,17 @@ impl<'a> Lexer<'a> {
     fn consume_iden_or_keyword(&mut self) -> TokenKind {
         let thing = consume_iden(&self.input[self.pos..]);
 
+        self.pos += thing.len();
         match thing {
-            "def" => {
-                self.pos += 3;
-                Keyword(Keyword::Def)
-            }
-            "true" => {
-                self.pos += 4;
-                Keyword(Keyword::Bool(true))
-            }
-            "false" => {
-                self.pos += 5;
-                Keyword(Keyword::Bool(false))
-            }
-            "import" => {
-                self.pos += 6;
-                Keyword(Keyword::Import)
-            }
-            thing => {
-                self.pos += thing.len();
-                Identifier(thing.to_string())
-            }
+            "def" => Keyword(Keyword::Def),
+            "true" => Keyword(Keyword::Bool(true)),
+            "false" => Keyword(Keyword::Bool(false)),
+            "import" => Keyword(Keyword::Import),
+            "while" => Keyword(Keyword::While),
+            "if" => Keyword(Keyword::If),
+            "else" => Keyword(Keyword::Else),
+            "return" => Keyword(Keyword::Return),
+            thing => Identifier(thing.to_string()),
         }
     }
 
@@ -237,7 +345,7 @@ impl<'a> Lexer<'a> {
                 '0'..='9' => {
                     self.pos += 1;
                 }
-                '.' if !is_float => match *self.chars.get(self.pos).unwrap() {
+                '.' if !is_float => match *self.chars.get(self.pos + 1).unwrap() {
                     '0'..'9' => {
                         is_float = true;
                         self.pos += 2;
