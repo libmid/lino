@@ -1,0 +1,11 @@
+import std.libc;
+import std.ffi;
+
+def print_str(str s) i32 {
+    def s = ffi.str_2_cstr(s);
+    return libc.puts(s);
+}
+
+def println_str(str s) i32 {
+    print_str(s + "\n");
+}

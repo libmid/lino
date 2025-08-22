@@ -1,51 +1,89 @@
 use std::collections::HashMap;
 
-use crate::{
-    TokenKind::{self, *},
-    parser::error::ParserError,
-};
+pub type SymbolTable = HashMap<String, Symbol>;
 
 #[derive(Debug)]
 pub struct L1Ast {
     // The reason of using a map instead of set here is to
     // allow overloading.
     pub imports: Vec<L1Import>,
-    pub struct_defs: HashMap<String, Symbol>,
-    pub fn_declerations: HashMap<String, Symbol>,
-    pub funcs: HashMap<String, Symbol>,
+    pub symbols: SymbolTable,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Symbol {
     Struct(L1Struct),
+    Enum(L1Enum),
     FnDeclr(L1FnDeclr),
     Fn(L1Fn),
+}
+
+impl From<&Symbol> for L1Type {
+    fn from(value: &Symbol) -> Self {
+        match value {
+            Symbol::Struct(l1_struct) => L1Type::Struct(l1_struct.name.clone()),
+            Symbol::Enum(l1_enum) => todo!("L1Enum to L1type"),
+            Symbol::FnDeclr(l1_fn_declr) => todo!(),
+            Symbol::Fn(l1_fn) => todo!(),
+        }
+    }
+}
+
+impl From<Symbol> for L1Type {
+    fn from(value: Symbol) -> Self {
+        match value {
+            Symbol::Struct(l1_struct) => L1Type::Struct(l1_struct.name.clone()),
+            Symbol::Enum(l1_enum) => todo!("L1Enum to L1type"),
+            Symbol::FnDeclr(l1_fn_declr) => L1Type::Fn {
+                name: l1_fn_declr.name,
+                args: l1_fn_declr
+                    .args
+                    .iter()
+                    .map(|f| L1ArgField {
+                        name: f.name.clone(),
+                        ty: f.ty.clone(),
+                    })
+                    .collect(),
+                ret: l1_fn_declr.ret.into(),
+            },
+            Symbol::Fn(l1_fn) => L1Type::Fn {
+                name: l1_fn.name.clone(),
+                args: l1_fn
+                    .args
+                    .iter()
+                    .map(|f| L1ArgField {
+                        name: f.name.clone(),
+                        ty: f.ty.clone(),
+                    })
+                    .collect(),
+                ret: l1_fn.ret.clone().into(),
+            },
+        }
+    }
 }
 
 impl L1Ast {
     pub fn new() -> Self {
         Self {
             imports: Vec::new(),
-            struct_defs: HashMap::new(),
-            fn_declerations: HashMap::new(),
-            funcs: HashMap::new(),
+            symbols: HashMap::new(),
         }
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct L1Import {
     pub fragment: L1ImportFragment,
     pub nexts: Option<Vec<L1Import>>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum L1ImportFragment {
     Path(String),
     All,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum L1Type {
     U8,
     U16,
@@ -60,14 +98,21 @@ pub enum L1Type {
     Bool,
     Str,
     Char,
+    Struct(String),
+    Enum(String),
     Arr(Box<L1Type>),
     // Not a real type
     // Parser reduces this to Arr(Type) in later stages
     Variadic(Box<L1Type>),
-    Fn { args: Vec<L1Type>, ret: Box<L1Type> },
+    Fn {
+        name: String,
+        args: Vec<L1ArgField>,
+        ret: Box<L1Type>,
+    },
     Ptr(Box<L1Type>),
-    Struct { fileds: Vec<L1Type> },
-    Interface { symbols: HashMap<String, L1Type> },
+    Interface {
+        symbols: HashMap<String, L1Type>,
+    },
     Void,
     // Not a real type
     // The parser backpathes this from symbols table
@@ -98,7 +143,19 @@ impl<'a> From<&'a str> for L1Type {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
+pub struct L1StructField {
+    pub name: String,
+    pub ty: L1Type,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct L1ArgField {
+    pub name: String,
+    pub ty: L1Type,
+}
+
+#[derive(Debug, Clone)]
 pub struct L1Fn {
     pub name: String,
     pub generics: Vec<L1Generic>,
@@ -107,7 +164,7 @@ pub struct L1Fn {
     pub ret: L1Type,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct L1FnDeclr {
     pub name: String,
     pub generics: Vec<L1Generic>,
@@ -115,25 +172,25 @@ pub struct L1FnDeclr {
     pub ret: L1Type,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct L1Interface {
     pub symbols: HashMap<String, L1Type>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct L1Generic {
     pub name: String,
     pub interfaces: Vec<L1Type>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct L1Arg {
     pub name: String,
     pub ty: L1Type,
     pub default: Option<L1Value>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum L1Value {
     U64(u64),
     I64(i64),
@@ -145,7 +202,7 @@ pub enum L1Value {
     // struct here
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct L1Block {
     pub statements: Vec<L1Statement>,
 }
@@ -162,7 +219,7 @@ impl L1Block {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum L1Statement {
     Block(L1Block),
     Declaration {
@@ -172,31 +229,32 @@ pub enum L1Statement {
     FnDef(L1Fn),
     ExternFnDeclr(L1FnDeclr),
     StructDef(L1Struct),
+    EnumDef(L1Enum),
     Assign {
         lhs: L1Expression,
         rhs: L1Expression,
     },
     While(L1While),
     If(L1If),
-    Return(L1Expression),
+    Return(Option<L1Expression>),
     Expr(L1Expression),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct L1Variable {
     pub name: String,
     pub ty: L1Type,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct L1Expression {
     pub ty: L1Type,
     pub expr: L1ExpressionInner,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum L1ExpressionInner {
-    // TODO: Add number types
+    // TODO: Add negative number types
     Int(u64),
     Float(f64),
     Str(String),
@@ -227,7 +285,7 @@ pub enum L1ExpressionInner {
     },
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum BinOp {
     /// "+"
     Addition,
@@ -264,58 +322,41 @@ pub enum BinOp {
     Rsh,
 }
 
-impl TryFrom<TokenKind> for BinOp {
-    type Error = ParserError;
-
-    fn try_from(value: TokenKind) -> Result<Self, Self::Error> {
-        let op = match value {
-            Plus => BinOp::Addition,
-            Minus => BinOp::Subtraction,
-            Star => BinOp::Multiplication,
-            Slash => BinOp::Division,
-            Percent => BinOp::Modulus,
-            Lt => BinOp::LessThan,
-            Lte => BinOp::LessThanOrEqual,
-            Gt => BinOp::GreaterThan,
-            Gte => BinOp::GreaterThanOrEqual,
-            DoubleEq => BinOp::Equal,
-            NotEq => BinOp::NotEqual,
-            AndAnd => BinOp::And,
-            And => BinOp::BitwiseAnd,
-            OrOr => BinOp::Or,
-            Or => BinOp::BitwiseOr,
-            Xor => BinOp::Xor,
-            Lsh => BinOp::Lsh,
-            Rsh => BinOp::Rsh,
-
-            _ => return Err(ParserError::InvalidBinOp),
-        };
-
-        Ok(op)
-    }
-}
-
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct L1While {
     pub condition: L1Expression,
     pub body: L1Block,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct L1If {
     pub if_cond: L1Expression,
     pub else_block: Option<L1Block>,
     pub if_block: L1Block,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct L1NamedExpr {
     pub name: Option<String>,
     pub expr: L1Expression,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct L1Struct {
     pub name: String,
+    pub generics: Vec<L1Generic>,
     pub fields: Vec<L1Arg>,
+}
+
+#[derive(Debug, Clone)]
+pub struct L1Enum {
+    pub name: String,
+    pub generics: Vec<L1Generic>,
+    pub variants: Vec<L1EnumVariant>,
+}
+
+#[derive(Debug, Clone)]
+pub struct L1EnumVariant {
+    pub name: String,
+    pub ty: Option<L1Type>,
 }

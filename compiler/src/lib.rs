@@ -1,12 +1,19 @@
+use std::fs::File;
+use std::io::{self, Write};
 use std::path::PathBuf;
 
+use codegen::Codegen;
+use codegen::qbe::QbeBackend;
 use codespan_reporting::diagnostic::{Diagnostic, Label};
 use codespan_reporting::files::SimpleFiles;
 use codespan_reporting::term;
 use codespan_reporting::term::termcolor::{ColorChoice, StandardStream};
 
+use crate::analysis::backpatch::backpatch;
+use crate::analysis::inference::Inference;
 pub use crate::lexer::{Token, TokenKind};
 
+mod analysis;
 mod lexer;
 mod parser;
 
@@ -18,12 +25,13 @@ pub enum Target {
 pub struct Compiler {
     target: Target,
     input_file: PathBuf,
+    stdlib: Option<PathBuf>,
     output_file: PathBuf,
     input: String,
 }
 
 impl Compiler {
-    pub fn new(input_file: PathBuf, target: Target) -> Self {
+    pub fn new(input_file: PathBuf, stdlib: Option<PathBuf>, target: Target) -> Self {
         let input = std::fs::read_to_string(&input_file).unwrap_or_else(|err| {
             eprintln!("ERROR: {}", err);
             std::process::exit(1);
@@ -31,9 +39,10 @@ impl Compiler {
 
         Self {
             target: target,
-            input_file: input_file,
+            input_file,
+            stdlib,
             input,
-            output_file: "a.lb".into(),
+            output_file: "build/ir.ssa".into(),
         }
     }
 
@@ -43,14 +52,13 @@ impl Compiler {
     }
 
     pub fn compile(&mut self) {
-        // Step 1: Tokenize
-        // Step 2: Parse tokens into initial parsing tree
         // Step 3: Parse imports
         // Step 3.5: Verify the order of default args
-        // Step 4: Backpatch types
-        // Step 5: Infer expression type
-        // Step 6: Type Checking
+        // Step 5: Reorder bin ops
+        // Step 8: Type Checking
+        // Step ??: Dead code elimination
 
+        // Step 1: Tokenize
         let lxr = lexer::Lexer::new(&self.input);
         let tokens = lxr.tokenize();
 
@@ -59,15 +67,35 @@ impl Compiler {
 
         let tokens_without_whitespace: Vec<Token> = tokens
             .into_iter()
-            .filter(|token| token.kind != TokenKind::Whitespace)
+            .filter(|token| match token.kind {
+                TokenKind::Comment(_) | TokenKind::Whitespace => false,
+                _ => true,
+            })
             .collect();
 
-        dbg!(&tokens_without_whitespace);
-
+        // Step 2: Parse tokens into initial parsing tree
         let mut l1p = parser::L1Parser::new(&tokens_without_whitespace);
+        // TODO: Better error reporting
         l1p.parse().unwrap();
+        
+        // Step 4: Backpatch types
+        backpatch(l1p.get_ast()).unwrap();
+        
+        // Step 7: Infer expression type
+        let inference = Inference::new(l1p.get_ast());
+        inference.infer_types(l1p.get_ast()).unwrap();
+        
+        // dbg!(l1p.get_ast());
 
-        dbg!(l1p.get_ast());
+        // Step 9: Codegen
+        let cg = Codegen::new(QbeBackend::new());
+        let qbe_ir = cg.generate(&l1p.get_ast());
+
+        println!("{}", &qbe_ir);
+
+        let _ = std::fs::create_dir("build/");
+        let mut out = File::create(&self.output_file).unwrap();
+        out.write_all(qbe_ir.as_bytes()).unwrap();
     }
 
     fn error_tokens(&self, tokens: &Vec<Token>) {

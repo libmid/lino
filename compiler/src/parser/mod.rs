@@ -1,15 +1,10 @@
-use crate::{
-    Token, TokenKind,
-    lexer::Keyword,
-    parser::{
-        error::ParserError,
-        l1st::{L1Ast, L1Statement},
-    },
-};
+use crate::{Token, TokenKind, lexer::Keyword, parser::error::ParserError};
 
 pub mod error;
+mod imports;
 mod l1rules;
-pub mod l1st;
+
+use ast::{L1Ast, L1Statement};
 
 use error::Result;
 
@@ -18,6 +13,7 @@ pub struct L1Parser<'a> {
     tokens: &'a Vec<Token<'a>>,
     ast: L1Ast,
     current_tok: usize,
+    saved_state: usize,
 }
 
 impl<'a> L1Parser<'a> {
@@ -26,7 +22,16 @@ impl<'a> L1Parser<'a> {
             tokens: tokens,
             ast: L1Ast::new(),
             current_tok: 0,
+            saved_state: 0,
         }
+    }
+
+    pub fn snapshot(&mut self) {
+        self.saved_state = self.current_tok;
+    }
+
+    pub fn rollback(&mut self) {
+        self.current_tok = self.saved_state;
     }
 
     pub fn parse(&mut self) -> Result<()> {
@@ -48,16 +53,20 @@ impl<'a> L1Parser<'a> {
                 match statement {
                     L1Statement::FnDef(func) => self
                         .ast
-                        .funcs
-                        .insert(func.name.clone(), l1st::Symbol::Fn(func)),
+                        .symbols
+                        .insert(func.name.clone(), ast::Symbol::Fn(func)),
                     L1Statement::ExternFnDeclr(func) => self
                         .ast
-                        .fn_declerations
-                        .insert(func.name.clone(), l1st::Symbol::FnDeclr(func)),
+                        .symbols
+                        .insert(func.name.clone(), ast::Symbol::FnDeclr(func)),
                     L1Statement::StructDef(strct) => self
                         .ast
-                        .struct_defs
-                        .insert(strct.name.clone(), l1st::Symbol::Struct(strct)),
+                        .symbols
+                        .insert(strct.name.clone(), ast::Symbol::Struct(strct)),
+                    L1Statement::EnumDef(e) => self
+                        .ast
+                        .symbols
+                        .insert(e.name.clone(), ast::Symbol::Enum(e)),
                     _ => unreachable!(),
                 };
             }
@@ -78,8 +87,8 @@ impl<'a> L1Parser<'a> {
         todo!()
     }
 
-    pub fn get_ast(&self) -> &L1Ast {
-        &self.ast
+    pub fn get_ast(&mut self) -> &mut L1Ast {
+        &mut self.ast
     }
 
     fn next(&mut self) -> Option<&Token> {

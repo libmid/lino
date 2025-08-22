@@ -23,7 +23,8 @@ pub enum ParserError {
     InvalidCall,
     InvalidExpr,
     InvalidBinOp,
-
+    InvalidStructInit,
+    
     /// No  more tokens
     EOF,
 }

@@ -4,12 +4,13 @@ use crate::{
     parser::{
         L1Parser,
         error::{ParserError, Result},
-        l1st::{
-            BinOp, L1Arg, L1Block, L1Expression, L1ExpressionInner, L1Fn, L1FnDeclr, L1Generic,
-            L1If, L1Import, L1ImportFragment, L1NamedExpr, L1Statement, L1Struct, L1Type, L1Value,
-            L1Variable, L1While,
-        },
     },
+};
+
+use ast::{
+    BinOp, L1Arg, L1Block, L1Enum, L1EnumVariant, L1Expression, L1ExpressionInner, L1Fn, L1FnDeclr,
+    L1Generic, L1If, L1Import, L1ImportFragment, L1NamedExpr, L1Statement, L1Struct, L1Type,
+    L1Value, L1Variable, L1While,
 };
 
 impl<'a> L1Parser<'a> {
@@ -172,13 +173,29 @@ impl<'a> L1Parser<'a> {
 
                 Ok(L1Statement::FnDef(func))
             }
-            // Is a struct
+            // Is a struct or enum
             CurlyBracesOpen => {
                 self.match_token(CurlyBracesOpen)?;
-                let fields = self.parse_args(CurlyBracesClose)?;
-                self.match_token(CurlyBracesClose)?;
-
-                Ok(L1Statement::StructDef(L1Struct { name, fields }))
+                // Try to parse it as a struct
+                self.snapshot();
+                if let Ok(fields) = self.parse_args(CurlyBracesClose) {
+                    self.match_token(CurlyBracesClose)?;
+                    Ok(L1Statement::StructDef(L1Struct {
+                        name,
+                        generics,
+                        fields,
+                    }))
+                } else {
+                    self.rollback();
+                    // Try to parse it as an enum
+                    let variants = self.parse_enum_variants()?;
+                    self.match_token(CurlyBracesClose)?;
+                    Ok(L1Statement::EnumDef(L1Enum {
+                        name,
+                        generics,
+                        variants,
+                    }))
+                }
             }
             // Variable with type
             Colon => {
@@ -288,6 +305,16 @@ impl<'a> L1Parser<'a> {
         let ty = match self.peek()?.kind {
             Identifier(_) => {
                 let iden = self.match_iden()?;
+                match self.peek()?.kind {
+                    ColonColon => {
+                        self.match_token(ColonColon)?;
+                        self.match_token(BraceOpen)?;
+                        // TODO: Use the generics list
+                        let generics_list = self.parse_type_list(BraceClose)?;
+                        self.match_token(BraceClose)?;
+                    }
+                    _ => {}
+                }
                 L1Type::from(iden.as_str())
             }
             SquareBracesOpen => {
@@ -305,7 +332,73 @@ impl<'a> L1Parser<'a> {
             }
         };
 
-        Ok(L1Type::from(ty))
+        Ok(ty)
+    }
+
+    fn parse_type_list(&mut self, close_token: TokenKind) -> Result<Vec<L1Type>> {
+        match &self.peek()?.kind {
+            token if token == &close_token => Ok(Vec::new()),
+            _ => {
+                let mut types = Vec::new();
+                let ty = self.parse_type()?;
+                types.push(ty);
+                loop {
+                    match &self.peek()?.kind {
+                        token if token == &close_token => {
+                            break;
+                        }
+                        Comma => {
+                            self.match_token(Comma)?;
+                        }
+                        _ => {
+                            let ty = self.parse_type()?;
+                            types.push(ty);
+                        }
+                    };
+                }
+                Ok(types)
+            }
+        }
+    }
+
+    fn parse_enum_variants(&mut self) -> Result<Vec<L1EnumVariant>> {
+        match &self.peek()?.kind {
+            CurlyBracesClose => Ok(Vec::new()),
+            _ => {
+                let mut variants = Vec::new();
+                let variant = self.parse_enum_variant()?;
+                variants.push(variant);
+                loop {
+                    match &self.peek()?.kind {
+                        CurlyBracesClose => {
+                            break;
+                        }
+                        Comma => {
+                            self.match_token(Comma)?;
+                        }
+                        _ => {
+                            let variant = self.parse_enum_variant()?;
+                            variants.push(variant);
+                        }
+                    };
+                }
+                Ok(variants)
+            }
+        }
+    }
+
+    fn parse_enum_variant(&mut self) -> Result<L1EnumVariant> {
+        let name = self.match_iden()?;
+        let mut ty = None;
+        match self.peek()?.kind {
+            BraceOpen => {
+                self.match_token(BraceOpen)?;
+                ty = Some(self.parse_type()?);
+                self.match_token(BraceClose)?;
+            }
+            _ => {}
+        }
+        Ok(L1EnumVariant { name, ty })
     }
 
     fn parse_args(&mut self, close_token: TokenKind) -> Result<Vec<L1Arg>> {
@@ -315,10 +408,19 @@ impl<'a> L1Parser<'a> {
                 let mut args = Vec::new();
                 let arg = self.parse_arg()?;
                 args.push(arg);
-                while self.peek()?.kind == Comma {
-                    self.match_token(Comma)?;
-                    let arg = self.parse_arg()?;
-                    args.push(arg);
+                loop {
+                    match &self.peek()?.kind {
+                        token if token == &close_token => {
+                            break;
+                        }
+                        Comma => {
+                            self.match_token(Comma)?;
+                        }
+                        _ => {
+                            let arg = self.parse_arg()?;
+                            args.push(arg);
+                        }
+                    };
                 }
                 Ok(args)
             }
@@ -402,11 +504,17 @@ impl<'a> L1Parser<'a> {
                 Keyword::Return => {
                     self.match_keyword(Keyword::Return)?;
 
-                    let expr = self.parse_expr()?;
+                    if self.peek()?.kind == SemiColon {
+                        self.match_token(SemiColon)?;
 
-                    self.match_token(SemiColon)?;
+                        L1Statement::Return(None)
+                    } else {
+                        let expr = self.parse_expr()?;
 
-                    L1Statement::Return(expr)
+                        self.match_token(SemiColon)?;
+
+                        L1Statement::Return(Some(expr))
+                    }
                 }
                 Keyword::While => {
                     let statement = self.parse_while()?;
@@ -542,6 +650,11 @@ impl<'a> L1Parser<'a> {
 
                         call
                     }
+                    CurlyBracesOpen => {
+                        let s = self.parse_struct_init()?;
+
+                        s
+                    }
                     _ => {
                         let iden = self.match_iden()?;
                         L1Expression {
@@ -571,6 +684,33 @@ impl<'a> L1Parser<'a> {
                     },
                 })
             }
+            Dot => self.parse_field_access(expr),
+
+            _ => Ok(expr),
+        }
+    }
+
+    fn parse_field_access(&mut self, lhs: L1Expression) -> Result<L1Expression> {
+        self.match_token(Dot)?;
+
+        let field = match self.peek_2()?.kind {
+            BraceOpen => self.parse_function_call()?,
+            _ => L1Expression {
+                ty: L1Type::Unknown,
+                expr: L1ExpressionInner::Variable(self.match_iden()?),
+            },
+        };
+
+        let expr = L1Expression {
+            ty: L1Type::Unknown,
+            expr: L1ExpressionInner::FieldAccess {
+                expr: Box::new(lhs),
+                field: Box::new(field),
+            },
+        };
+
+        match self.peek()?.kind {
+            Dot => self.parse_field_access(expr), // TODO: DO domething about array access
             _ => Ok(expr),
         }
     }
@@ -616,6 +756,47 @@ impl<'a> L1Parser<'a> {
         }
     }
 
+    fn parse_struct_init(&mut self) -> Result<L1Expression> {
+        let name = self.match_iden()?;
+        self.match_token(CurlyBracesOpen)?;
+
+        match self.peek()?.kind {
+            CurlyBracesClose => {
+                self.match_token(CurlyBracesClose)?;
+
+                Ok(L1Expression {
+                    ty: L1Type::Unknown,
+                    expr: L1ExpressionInner::StructInit {
+                        name,
+                        fields: vec![],
+                    },
+                })
+            }
+            _ => {
+                let mut fields = vec![self.parse_named_expr()?];
+
+                loop {
+                    match self.peek()?.kind {
+                        Comma => {
+                            self.match_token(Comma)?;
+                            fields.push(self.parse_named_expr()?);
+                        }
+                        CurlyBracesClose => {
+                            self.match_token(CurlyBracesClose)?;
+                            break;
+                        }
+                        _ => return Err(ParserError::InvalidStructInit),
+                    }
+                }
+
+                Ok(L1Expression {
+                    ty: L1Type::Unknown,
+                    expr: L1ExpressionInner::StructInit { name, fields },
+                })
+            }
+        }
+    }
+
     fn parse_named_expr(&mut self) -> Result<L1NamedExpr> {
         match self.peek()?.kind {
             Identifier(_) if self.peek_2()?.kind == Equals => {
@@ -632,5 +813,36 @@ impl<'a> L1Parser<'a> {
                 expr: self.parse_expr()?,
             }),
         }
+    }
+}
+
+impl TryFrom<TokenKind> for BinOp {
+    type Error = ParserError;
+
+    fn try_from(value: TokenKind) -> std::result::Result<Self, Self::Error> {
+        let op = match value {
+            Plus => BinOp::Addition,
+            Minus => BinOp::Subtraction,
+            Star => BinOp::Multiplication,
+            Slash => BinOp::Division,
+            Percent => BinOp::Modulus,
+            Lt => BinOp::LessThan,
+            Lte => BinOp::LessThanOrEqual,
+            Gt => BinOp::GreaterThan,
+            Gte => BinOp::GreaterThanOrEqual,
+            DoubleEq => BinOp::Equal,
+            NotEq => BinOp::NotEqual,
+            AndAnd => BinOp::And,
+            And => BinOp::BitwiseAnd,
+            OrOr => BinOp::Or,
+            Or => BinOp::BitwiseOr,
+            Xor => BinOp::Xor,
+            Lsh => BinOp::Lsh,
+            Rsh => BinOp::Rsh,
+
+            _ => return Err(ParserError::InvalidBinOp),
+        };
+
+        Ok(op)
     }
 }

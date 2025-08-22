@@ -15,13 +15,19 @@ struct LatticeCli {
 #[derive(Subcommand)]
 enum Commands {
     /// Compile a program to .lb file
-    Compile { file: PathBuf },
+    Compile {
+        file: PathBuf,
+        #[arg(short, long)]
+        stdlib: Option<PathBuf>,
+    },
 }
 
 fn main() {
     let cli = LatticeCli::parse();
 
     match cli.command {
-        Commands::Compile { file } => compiler::Compiler::new(file, Target::LtIR).compile(),
+        Commands::Compile { file, stdlib } => {
+            compiler::Compiler::new(file, stdlib, Target::LtIR).compile()
+        }
     }
 }

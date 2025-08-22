@@ -16,6 +16,8 @@ pub enum TokenKind {
     CurlyBracesClose,
     /// ":"
     Colon,
+    /// "::"
+    ColonColon,
     /// "*"
     Star,
     /// "["
@@ -65,12 +67,13 @@ pub enum TokenKind {
     Lsh,
     /// ">>"
     Rsh,
-
     Gt,
     Gte,
     Lt,
     Lte,
 
+    /// "#"
+    Comment(String),
     /// This only exists for error reporting, in practice the parser doesn't encounter this
     Unknown,
     /// Similarly parser doesn't see this too
@@ -164,10 +167,16 @@ impl<'a> Lexer<'a> {
                     self.pos += 1;
                     Some(BraceClose)
                 }
-                ':' => {
-                    self.pos += 1;
-                    Some(Colon)
-                }
+                ':' => match second_char {
+                    Some(':') => {
+                        self.pos += 2;
+                        Some(ColonColon)
+                    }
+                    _ => {
+                        self.pos += 1;
+                        Some(Colon)
+                    }
+                },
                 '*' => {
                     self.pos += 1;
                     Some(Star)
@@ -248,6 +257,10 @@ impl<'a> Lexer<'a> {
                 '^' => {
                     self.pos += 1;
                     Some(Xor)
+                }
+                '#' => {
+                    let comment = self.consume_comment();
+                    Some(comment)
                 }
 
                 '<' => match second_char {
@@ -334,6 +347,28 @@ impl<'a> Lexer<'a> {
         }
     }
 
+    fn consume_comment(&mut self) -> TokenKind {
+        let mut buf = String::new();
+        // Skip the #
+        self.pos += 1;
+
+        loop {
+            match self.chars.get(self.pos) {
+                None => break,
+                Some('\n') => {
+                    self.pos += 1;
+                    break;
+                }
+                Some(ch) => {
+                    buf.push(*ch);
+                    self.pos += 1;
+                }
+            };
+        }
+
+        Comment(buf)
+    }
+
     fn consume_number(&mut self) -> TokenKind {
         // TODO: Support binary, octal and hex
         let mut is_float = false;
@@ -369,10 +404,11 @@ impl<'a> Lexer<'a> {
         self.pos += 1;
         loop {
             match self.chars.get(self.pos).unwrap() {
-                '\\' => {
-                    self.pos += 1;
-                    buf.push(self.consume_escape())
-                }
+                // TODO: Analyse this
+                // '\\' => {
+                //     self.pos += 1;
+                //     buf.push(self.consume_escape())
+                // }
                 ch if *ch == '"' => break,
                 ch => {
                     buf.push(*ch);
