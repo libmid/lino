@@ -12,6 +12,7 @@ pub enum InferenceError {
     FieldAccessTypeImparity,
     NoSymbol,
     UndeclaredVariable,
+    DerefNoPtr,
 }
 
 pub struct Inference {
@@ -124,8 +125,8 @@ impl Inference {
                 ast::L1Statement::StructDef(_) => unreachable!(),
                 ast::L1Statement::EnumDef(_) => unreachable!(),
                 ast::L1Statement::Assign { lhs, rhs } => {
-                    self.infer_expr_ty(lhs, stack)?;
                     self.infer_expr_ty(rhs, stack)?;
+                    self.infer_expr_ty(lhs, stack)?;
                 }
                 ast::L1Statement::While(l1_while) => {
                     self.infer_expr_ty(&mut l1_while.condition, stack)?;
@@ -158,7 +159,7 @@ impl Inference {
         stack: &IndexMap<String, L1Type>,
     ) -> Result<(), InferenceError> {
         let ty = match &mut expr.expr {
-            ast::L1ExpressionInner::Int(_) => L1Type::I32,
+            ast::L1ExpressionInner::Int(_) => L1Type::I64,
             ast::L1ExpressionInner::Float(_) => L1Type::F64,
             ast::L1ExpressionInner::Str(_) => L1Type::Str,
             ast::L1ExpressionInner::Bool(_) => L1Type::Bool,
@@ -184,8 +185,13 @@ impl Inference {
                     self.infer_expr_ty(&mut arg.expr, stack)?;
                 }
 
-                if let Some(ty) = self.ty_table.get(name) {
-                    ty.clone()
+                if let Some(L1Type::Fn {
+                    name: _,
+                    args: _,
+                    ret,
+                }) = self.ty_table.get(name)
+                {
+                    *ret.clone()
                 } else {
                     return Err(InferenceError::NoSymbol);
                 }
@@ -210,8 +216,8 @@ impl Inference {
                 self.infer_expr_ty(lhs, stack)?;
                 self.infer_expr_ty(rhs, stack)?;
 
-                if lhs.ty == rhs.ty {
-                    lhs.ty.clone()
+                if let Some(ty) = L1Type::allows_binop(&lhs.ty, &rhs.ty) {
+                    ty
                 } else {
                     return Err(InferenceError::BinopImparity);
                 }
@@ -235,6 +241,14 @@ impl Inference {
                     expr.ty.clone()
                 } else {
                     return Err(InferenceError::FieldAccessTypeImparity);
+                }
+            }
+            ast::L1ExpressionInner::Deref(l1_expression) => {
+                self.infer_expr_ty(l1_expression, stack)?;
+
+                match &l1_expression.ty {
+                    L1Type::Ptr(ty) => *ty.clone(),
+                    _ => return Err(InferenceError::DerefNoPtr),
                 }
             }
         };

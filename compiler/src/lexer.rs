@@ -230,7 +230,6 @@ impl<'a> Lexer<'a> {
                     Some(Percent)
                 }
                 '/' => {
-                    // TODO: Support for comments
                     self.pos += 1;
                     Some(Slash)
                 }

@@ -1,0 +1,13 @@
+def printf(str buf, u64 a);
+def malloc(u64 len) *u64;
+
+def main() {
+    def p = malloc(5 * 8);
+    def i = 0;
+
+    while i < 5 {
+        *(p+i) = i+1;
+        printf("%d\n", *(p+i));
+        i = i + 1;
+    }
+}

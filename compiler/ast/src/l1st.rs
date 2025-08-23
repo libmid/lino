@@ -2,6 +2,8 @@ use std::collections::HashMap;
 
 pub type SymbolTable = HashMap<String, Symbol>;
 
+use L1Type::*;
+
 #[derive(Debug)]
 pub struct L1Ast {
     // The reason of using a map instead of set here is to
@@ -119,6 +121,18 @@ pub enum L1Type {
     Backpatch(String),
     // Not a real type. It is inferred later
     Unknown,
+}
+
+impl L1Type {
+    pub fn allows_binop(lhs: &Self, rhs: &Self) -> Option<Self> {
+        match lhs {
+            Ptr(_) | U64 | U32 | U16 | U8 | I64 | I32 | I16 | I8 => match rhs {
+                Ptr(_) | U64 | U32 | U16 | U8 | I64 | I32 | I16 | I8 => Some(lhs.clone()),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
 }
 
 impl<'a> From<&'a str> for L1Type {
@@ -283,6 +297,7 @@ pub enum L1ExpressionInner {
         expr: Box<L1Expression>,
         field: Box<L1Expression>,
     },
+    Deref(Box<L1Expression>),
 }
 
 #[derive(Debug, Clone)]

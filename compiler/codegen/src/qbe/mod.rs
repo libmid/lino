@@ -106,8 +106,55 @@ impl QbeBackend {
                 ast::L1Statement::ExternFnDeclr(_) => unreachable!(),
                 ast::L1Statement::StructDef(_) => unreachable!(),
                 ast::L1Statement::EnumDef(_) => unreachable!(),
-                ast::L1Statement::Assign { lhs, rhs } => todo!(),
-                ast::L1Statement::While(l1_while) => todo!(),
+                ast::L1Statement::Assign { lhs, rhs } => {
+                    // Right now LHS is always a variable
+                    // TODO: This might be array, pointer deref or field access as well
+
+                    match &lhs.expr {
+                        ast::L1ExpressionInner::Variable(v) => {
+                            let expr = self.gen_expr(rhs);
+                            self.func.assign_instr(
+                                Value::Temporary(v.clone()),
+                                self.tt(&lhs.ty).unwrap(),
+                                expr,
+                            );
+                        }
+                        ast::L1ExpressionInner::Deref(expr) => {
+                            let lhs_expr = self.gen_expr(expr);
+                            let (_, lhsi) =
+                                self.assign_new_temp(lhs_expr, self.tt(&lhs.ty).unwrap());
+
+                            let rhs_expr = self.gen_expr(rhs);
+                            let (_, rhsi) =
+                                self.assign_new_temp(rhs_expr, self.tt(&rhs.ty).unwrap());
+
+                            self.func.add_instr(Instr::Store(
+                                self.tt(&lhs.ty).unwrap(),
+                                lhsi,
+                                rhsi,
+                            ));
+                        }
+                        _ => todo!(),
+                    }
+                }
+                ast::L1Statement::While(l1_while) => {
+                    let while_block_start = self.new_block_name();
+                    let post_condition_block = self.new_block_name();
+                    let post_while_block = self.new_block_name();
+
+                    self.func.add_block(while_block_start.clone());
+                    let expr = self.gen_expr(&l1_while.condition);
+                    let (_, v) =
+                        self.assign_new_temp(expr, self.tt(&l1_while.condition.ty).unwrap());
+                    self.func.add_instr(Instr::Jnz(
+                        v,
+                        post_condition_block.clone(),
+                        post_while_block.clone(),
+                    ));
+                    self.generate_block(&l1_while.body, post_condition_block);
+                    self.func.add_instr(Instr::Jmp(while_block_start));
+                    self.func.add_block(post_while_block);
+                }
                 ast::L1Statement::If(l1_if) => {
                     let expr = self.gen_expr(&l1_if.if_cond);
                     let (_, v) = self.assign_new_temp(expr, self.tt(&l1_if.if_cond.ty).unwrap());
@@ -244,6 +291,13 @@ impl QbeBackend {
             }
             ast::L1ExpressionInner::StructInit { name, fields } => todo!(),
             ast::L1ExpressionInner::FieldAccess { expr, field } => todo!(),
+            ast::L1ExpressionInner::Deref(l1_expression) => {
+                let expr = self.gen_expr(&l1_expression);
+
+                let val = self.assign_new_temp(expr, self.tt(&l1_expression.ty).unwrap());
+
+                Instr::Load(val.0, val.1)
+            }
         }
     }
 

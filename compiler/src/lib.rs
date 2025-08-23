@@ -73,6 +73,8 @@ impl Compiler {
             })
             .collect();
 
+        // dbg!(&tokens_without_whitespace);
+
         // Step 2: Parse tokens into initial parsing tree
         let mut l1p = parser::L1Parser::new(&tokens_without_whitespace);
         // TODO: Better error reporting

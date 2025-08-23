@@ -491,9 +491,9 @@ impl<'a> L1Parser<'a> {
     }
 
     fn parse_statement(&mut self) -> Result<L1Statement> {
-        let token = self.peek()?;
+        let kind = &self.peek()?.kind.clone();
 
-        let statement = match &token.kind {
+        let statement = match kind {
             CurlyBracesOpen => L1Statement::Block(self.parse_block()?),
             Keyword(key) => match key {
                 Keyword::Def => {
@@ -529,9 +529,24 @@ impl<'a> L1Parser<'a> {
                 _ => return Err(ParserError::InvalidStatement),
             },
             _ => {
-                let expr = self.parse_expr()?;
+                let exp1 = self.parse_expr()?;
+
+                let stat = if self.peek()?.kind == Equals {
+                    self.match_token(Equals)?;
+
+                    let exp2 = self.parse_expr()?;
+
+                    L1Statement::Assign {
+                        lhs: exp1,
+                        rhs: exp2,
+                    }
+                } else {
+                    L1Statement::Expr(exp1)
+                };
+
                 self.match_token(SemiColon)?;
-                L1Statement::Expr(expr)
+
+                stat
             }
         };
 
@@ -664,7 +679,17 @@ impl<'a> L1Parser<'a> {
                     }
                 }
             }
-            _ => return Err(ParserError::InvalidExpr),
+            Star => {
+                self.match_token(Star)?;
+
+                L1Expression {
+                    ty: L1Type::Unknown,
+                    expr: L1ExpressionInner::Deref(self.parse_expr()?.into()),
+                }
+            }
+            tok => {
+                return Err(ParserError::InvalidExpr);
+            }
         };
 
         match self.peek()?.kind {
