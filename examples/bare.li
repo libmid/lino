@@ -1,2 +1,2 @@
-// Simplest possible lino program
+# Simplest possible lino program
 def main() i32 { return 0; }

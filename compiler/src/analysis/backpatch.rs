@@ -1,4 +1,6 @@
-use ast::{L1Ast, L1Fn, L1FnDeclr, L1Struct, L1Type, SymbolTable};
+use std::collections::HashMap;
+
+use ast::{L1Ast, L1Block, L1Fn, L1FnDeclr, L1Statement, L1Struct, L1Type, SymbolTable};
 
 const RECURSION_LIMIT: u32 = 300;
 
@@ -122,6 +124,40 @@ fn backpatch_fn(func: &mut L1Fn, symbols: &mut SymbolTable) -> Result<(), Backpa
         let bty = backpatch_type(&func.ret, symbols)?;
         func.ret = bty;
     }
+
+    backpatch_block(&mut func.body, symbols)?;
+
+    Ok(())
+}
+
+fn backpatch_block(block: &mut L1Block, symbols: &SymbolTable) -> Result<(), BackpatchError> {
+    for (_, ty) in &mut block.scope {
+        let bty = backpatch_type(ty, symbols)?;
+        *ty = bty;
+    }
+
+    for statement in &mut block.statements {
+        match statement {
+            L1Statement::Declaration { var, value: _ } => {
+                let bty = backpatch_type(&var.ty, symbols)?;
+                var.ty = bty;
+            }
+            L1Statement::While(wh) => {
+                backpatch_block(&mut wh.body, symbols)?;
+            }
+            L1Statement::If(i) => {
+                backpatch_block(&mut i.if_block, symbols)?;
+                if let Some(else_b) = &mut i.else_block {
+                    backpatch_block(else_b, symbols)?;
+                }
+            }
+            L1Statement::Block(block) => {
+                backpatch_block(block, symbols)?;
+            }
+            _ => {}
+        }
+    }
+
     Ok(())
 }
 
@@ -180,10 +216,7 @@ fn backpatch_type(ty: &L1Type, symbols: &SymbolTable) -> Result<L1Type, Backpatc
                 Err(BackpatchError::NoSymbol)
             }
         }
-        ty => {
-            dbg!(ty);
-            todo!()
-        }
+        ty => Ok(ty.clone()),
     }
 }
 

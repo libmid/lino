@@ -1,5 +1,5 @@
 use std::fs::File;
-use std::io::{self, Write};
+use std::io::Write;
 use std::path::PathBuf;
 
 use codegen::Codegen;
@@ -18,20 +18,52 @@ mod lexer;
 mod parser;
 
 pub enum Target {
-    // Lattice Text IR
-    LtIR,
+    Qbe,
+}
+
+#[derive(Debug)]
+pub struct CompilerOptions {
+    print_output_flag: bool,
+    stdlib: Option<PathBuf>,
+    output_file: PathBuf,
+}
+
+impl Default for CompilerOptions {
+    fn default() -> Self {
+        Self {
+            print_output_flag: Default::default(),
+            stdlib: Default::default(),
+            output_file: "build/out.ssa".into(),
+        }
+    }
+}
+
+impl CompilerOptions {
+    pub fn print_output(&mut self) -> &mut Self {
+        self.print_output_flag = true;
+        self
+    }
+
+    pub fn stdlib(&mut self, stdlib: PathBuf) -> &mut Self {
+        self.stdlib = Some(stdlib);
+        self
+    }
+
+    pub fn output_file(&mut self, output_file: impl Into<PathBuf>) -> &mut Self {
+        self.output_file = output_file.into();
+        self
+    }
 }
 
 pub struct Compiler {
     target: Target,
     input_file: PathBuf,
-    stdlib: Option<PathBuf>,
-    output_file: PathBuf,
     input: String,
+    options: CompilerOptions,
 }
 
 impl Compiler {
-    pub fn new(input_file: PathBuf, stdlib: Option<PathBuf>, target: Target) -> Self {
+    pub fn new(input_file: PathBuf, target: Target, options: CompilerOptions) -> Self {
         let input = std::fs::read_to_string(&input_file).unwrap_or_else(|err| {
             eprintln!("ERROR: {}", err);
             std::process::exit(1);
@@ -40,15 +72,9 @@ impl Compiler {
         Self {
             target: target,
             input_file,
-            stdlib,
             input,
-            output_file: "build/ir.ssa".into(),
+            options,
         }
-    }
-
-    pub fn output_file(&mut self, path: PathBuf) -> &mut Self {
-        self.output_file = path;
-        self
     }
 
     pub fn compile(&mut self) {
@@ -79,6 +105,7 @@ impl Compiler {
         let mut l1p = parser::L1Parser::new(&tokens_without_whitespace);
         // TODO: Better error reporting
         l1p.parse().unwrap();
+
         
         // Step 4: Backpatch types
         backpatch(l1p.get_ast()).unwrap();
@@ -86,18 +113,22 @@ impl Compiler {
         // Step 7: Infer expression type
         let inference = Inference::new(l1p.get_ast());
         inference.infer_types(l1p.get_ast()).unwrap();
-        
+
         // dbg!(l1p.get_ast());
-
+        
         // Step 9: Codegen
-        let cg = Codegen::new(QbeBackend::new());
-        let qbe_ir = cg.generate(&l1p.get_ast());
+        let cg = match self.target {
+            Target::Qbe => Codegen::new(QbeBackend::new()),
+        };
 
-        println!("{}", &qbe_ir);
+        let output = cg.generate(&l1p.get_ast());
 
-        let _ = std::fs::create_dir("build/");
-        let mut out = File::create(&self.output_file).unwrap();
-        out.write_all(qbe_ir.as_bytes()).unwrap();
+        if self.options.print_output_flag {
+            println!("{}", &output);
+        }
+
+        let mut out = File::create(&self.options.output_file).unwrap();
+        out.write_all(output.as_bytes()).unwrap();
     }
 
     fn error_tokens(&self, tokens: &Vec<Token>) {

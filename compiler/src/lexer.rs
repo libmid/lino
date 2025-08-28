@@ -92,6 +92,7 @@ pub enum Keyword {
     Def,
     /// true and false
     Bool(bool),
+    Null,
     Import,
     While,
     If,
@@ -337,6 +338,7 @@ impl<'a> Lexer<'a> {
             "def" => Keyword(Keyword::Def),
             "true" => Keyword(Keyword::Bool(true)),
             "false" => Keyword(Keyword::Bool(false)),
+            "null" => Keyword(Keyword::Null),
             "import" => Keyword(Keyword::Import),
             "while" => Keyword(Keyword::While),
             "if" => Keyword(Keyword::If),

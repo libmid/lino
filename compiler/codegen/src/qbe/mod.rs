@@ -1,10 +1,11 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::Backend;
-use ast::{L1Arg, L1Block, L1Expression, L1Fn, L1Statement, L1Struct, L1Type};
-use qubers::{
-    Block, Cmp, DataDef, DataItem, Function, Instr, Linkage, Module, Type, TypeDef, Value,
+use ast::{
+    L1Arg, L1Block, L1Expression, L1ExpressionInner, L1Fn, L1Statement, L1Struct, L1Type,
+    L1Variable,
 };
+use qubers::{Cmp, DataDef, DataItem, Function, Instr, Linkage, Module, Type, TypeDef, Value};
 
 pub struct QbeBackend {
     module: Module,
@@ -14,6 +15,7 @@ pub struct QbeBackend {
     expr_counter: u64,
     block_counter: u64,
     func: Function,
+    local_defs: HashSet<String>,
 }
 
 impl Backend for QbeBackend {
@@ -38,7 +40,10 @@ impl Backend for QbeBackend {
                 }
                 ast::Symbol::Enum(l1_enum) => todo!(),
                 ast::Symbol::FnDeclr(l1_fn_declr) => {}
-                ast::Symbol::Fn(l1_fn) => self.generate_fn(&l1_fn),
+                ast::Symbol::Fn(l1_fn) => {
+                    self.local_defs.clear();
+                    self.generate_fn(&l1_fn);
+                }
             }
         }
 
@@ -56,6 +61,7 @@ impl QbeBackend {
             block_counter: 0,
             st_lookup: HashMap::new(),
             func: Function::new(Linkage::public(), "", vec![], None),
+            local_defs: HashSet::new(),
         }
     }
 
@@ -69,7 +75,7 @@ impl QbeBackend {
 
         self.func = func;
 
-        self.generate_block(&l1_fn.body, "start".into());
+        self.generate_function_body(l1_fn);
 
         let block = self.func.blocks.last_mut().unwrap();
         if !block.jumps() {
@@ -79,7 +85,27 @@ impl QbeBackend {
         self.module.add_function(self.func.clone());
     }
 
-    fn generate_block<'a>(&mut self, l1_block: &L1Block, label: String) {
+    fn generate_function_body(&mut self, func: &L1Fn) {
+        self.func.add_block("arg.init");
+
+        for arg in &func.args {
+            let ty = self.tt(&arg.ty).unwrap().into_base();
+            self.func.assign_instr(
+                Value::Temporary(arg.name.clone()),
+                Type::Long,
+                Instr::Alloc8(self.type_base_size(&arg.ty)),
+            );
+            self.func.add_instr(Instr::Store(
+                ty,
+                Value::Temporary(arg.name.clone()),
+                Value::Temporary(format!("{}.arg", arg.name)),
+            ));
+        }
+
+        self.generate_block(&func.body, "func.body");
+    }
+
+    fn generate_block<'a>(&mut self, l1_block: &L1Block, label: impl Into<String>) {
         self.func.add_block(label);
         self.generate_statements(&l1_block.statements);
     }
@@ -92,15 +118,26 @@ impl QbeBackend {
                     self.generate_block(l1_block, l);
                 }
                 ast::L1Statement::Declaration { var, value } => {
+                    self.local_defs.insert(var.name.clone());
+
                     let mut init = Instr::Copy(Value::Const(0));
                     if let Some(expr) = value {
                         init = self.gen_expr(expr);
                     }
+                    let init = self.assign_new_temp(init, self.tt(&var.ty).unwrap());
+
+                    let addr = Value::Temporary(var.name.clone());
+                    // Allocate stack space for the variable
                     self.func.assign_instr(
-                        Value::Temporary(var.name.clone()),
-                        self.tt(&var.ty).unwrap(),
-                        init,
+                        addr.clone(),
+                        Type::Long,
+                        Instr::Alloc8(self.type_size(&var.ty)),
                     );
+
+                    if !matches!(var.ty, L1Type::Struct(_)) {
+                        self.func
+                            .add_instr(Instr::Store(init.0.into_base(), addr, init.1));
+                    }
                 }
                 ast::L1Statement::FnDef(_) => unreachable!(),
                 ast::L1Statement::ExternFnDeclr(_) => unreachable!(),
@@ -110,31 +147,138 @@ impl QbeBackend {
                     // Right now LHS is always a variable
                     // TODO: This might be array, pointer deref or field access as well
 
+                    let rhs_expr = self.gen_expr(rhs);
+                    let (rty, rhsi) = self.assign_new_temp(rhs_expr, self.tt(&rhs.ty).unwrap());
+
                     match &lhs.expr {
                         ast::L1ExpressionInner::Variable(v) => {
-                            let expr = self.gen_expr(rhs);
-                            self.func.assign_instr(
+                            // if self.local_defs.contains(v) {
+                            //     self.func.add_instr(Instr::Store(
+                            //         rty.into_base(),
+                            //         Value::Temporary(v.clone()),
+                            //         rhsi,
+                            //     ))
+                            // } else {
+                            //     self.func.assign_instr(
+                            //         Value::Temporary(v.clone()),
+                            //         rty,
+                            //         Instr::Copy(rhsi),
+                            //     );
+                            // }
+
+                            self.func.add_instr(Instr::Store(
+                                rty.into_base(),
                                 Value::Temporary(v.clone()),
-                                self.tt(&lhs.ty).unwrap(),
-                                expr,
-                            );
+                                rhsi,
+                            ))
                         }
                         ast::L1ExpressionInner::Deref(expr) => {
                             let lhs_expr = self.gen_expr(expr);
                             let (_, lhsi) =
                                 self.assign_new_temp(lhs_expr, self.tt(&lhs.ty).unwrap());
 
-                            let rhs_expr = self.gen_expr(rhs);
-                            let (_, rhsi) =
-                                self.assign_new_temp(rhs_expr, self.tt(&rhs.ty).unwrap());
-
-                            self.func.add_instr(Instr::Store(
-                                self.tt(&lhs.ty).unwrap(),
-                                lhsi,
-                                rhsi,
-                            ));
+                            self.func
+                                .add_instr(Instr::Store(rty.into_base(), lhsi, rhsi));
                         }
-                        _ => todo!(),
+                        ast::L1ExpressionInner::FieldAccess { expr: e, field } => {
+                            let var = e
+                                .to_var_name()
+                                // .unwrap_or_else(e.to_deref_var_name)
+                                .expect("Not a variable or variable deref")
+                                .clone();
+                            match &e.ty {
+                                L1Type::Struct(s) => {
+                                    let offset_addr = match &e.expr {
+                                        L1ExpressionInner::Variable(v) => {
+                                            let st = self.st_lookup.get(s).unwrap();
+                                            let offset = self
+                                                .calc_offset(st, field.to_field_name().unwrap());
+
+                                            let access = Instr::Add(
+                                                Value::Temporary(var),
+                                                Value::Const(offset),
+                                            );
+                                            let offset_addr =
+                                                self.assign_new_temp(access, Type::Long);
+
+                                            offset_addr
+                                        }
+                                        L1ExpressionInner::Deref(drf) => {
+                                            let st = self.st_lookup.get(s).unwrap();
+                                            let offset = self
+                                                .calc_offset(st, field.to_field_name().unwrap());
+
+                                            // let actual_addr = if self.local_defs.contains(&var) {
+                                            //     self.assign_new_temp(
+                                            //         Instr::Load(Type::Long, Value::Temporary(var)),
+                                            //         Type::Long,
+                                            //     )
+                                            //     .1
+                                            // } else {
+                                            //     Value::Temporary(var)
+                                            // };
+                                            let actual_addr = self
+                                                .assign_new_temp(
+                                                    Instr::Load(Type::Long, Value::Temporary(var)),
+                                                    Type::Long,
+                                                )
+                                                .1;
+
+                                            let access =
+                                                Instr::Add(actual_addr, Value::Const(offset));
+                                            let offset_addr =
+                                                self.assign_new_temp(access, Type::Long);
+
+                                            offset_addr
+                                        }
+                                        _ => todo!(),
+                                    };
+
+                                    self.func.add_instr(Instr::Store(
+                                        rty.into_base(),
+                                        offset_addr.1,
+                                        rhsi,
+                                    ));
+                                }
+                                L1Type::Ptr(ptr) => match **ptr {
+                                    L1Type::Struct(ref s) => {
+                                        let st = self.st_lookup.get(s).unwrap();
+                                        let offset =
+                                            self.calc_offset(st, field.to_field_name().unwrap());
+
+                                        // let actual_addr = if self.local_defs.contains(&var) {
+                                        //     self.assign_new_temp(
+                                        //         Instr::Load(Type::Long, Value::Temporary(var)),
+                                        //         Type::Long,
+                                        //     )
+                                        //     .1
+                                        // } else {
+                                        //     Value::Temporary(var)
+                                        // };
+                                        let actual_addr = self
+                                            .assign_new_temp(
+                                                Instr::Load(Type::Long, Value::Temporary(var)),
+                                                Type::Long,
+                                            )
+                                            .1;
+
+                                        let access = Instr::Add(actual_addr, Value::Const(offset));
+                                        let offset_addr = self.assign_new_temp(access, Type::Long);
+
+                                        self.func.add_instr(Instr::Store(
+                                            rty.into_base(),
+                                            offset_addr.1,
+                                            rhsi,
+                                        ));
+                                    }
+                                    _ => {}
+                                },
+
+                                // Only struct fields can be accessed
+                                t => unreachable!("{t:?}"),
+                            }
+                        }
+                        t => todo!("{:?}", t),
                     }
                 }
                 ast::L1Statement::While(l1_while) => {
@@ -190,17 +334,17 @@ impl QbeBackend {
 
     fn new_data_name(&mut self) -> String {
         self.data_counter += 1;
-        format!("d{}", self.data_counter)
+        format!("data.{}", self.data_counter)
     }
 
     fn new_block_name(&mut self) -> String {
         self.block_counter += 1;
-        format!("d{}", self.block_counter)
+        format!("block.{}", self.block_counter)
     }
 
     fn new_expr_name(&mut self) -> String {
         self.expr_counter += 1;
-        format!("e{}", self.expr_counter)
+        format!("expr.{}", self.expr_counter)
     }
 
     fn add_new_or_existing_data(&mut self, data: &String) -> Value {
@@ -234,8 +378,9 @@ impl QbeBackend {
 
     fn gen_expr(&mut self, expr: &L1Expression) -> Instr {
         match &expr.expr {
+            ast::L1ExpressionInner::Null => Instr::Copy(Value::Const(0)),
             ast::L1ExpressionInner::Int(i) => Instr::Copy(Value::Const(*i)),
-            ast::L1ExpressionInner::Float(_) => todo!(),
+            ast::L1ExpressionInner::Float(f) => Instr::Copy(Value::Const(f.to_bits())),
             ast::L1ExpressionInner::Str(s) => {
                 let data = self.add_new_or_existing_data(s);
                 Instr::Copy(data)
@@ -252,14 +397,32 @@ impl QbeBackend {
             ast::L1ExpressionInner::FnCall { name, args } => {
                 let mut instrs = Vec::with_capacity(args.len());
                 for expr in args {
-                    let instr = self.gen_expr(&expr.expr);
+                    let instr;
+                    if !matches!(expr.expr.ty, L1Type::Struct(_)) {
+                        instr = self.gen_expr(&expr.expr);
+                    } else {
+                        instr = self.gen_expr(&L1Expression {
+                            ty: L1Type::Ptr(expr.expr.ty.clone().into()),
+                            expr: L1ExpressionInner::Ref(expr.expr.clone().into()),
+                        });
+                    }
                     let temp = self.assign_new_temp(instr, self.tt(&expr.expr.ty).unwrap());
                     instrs.push(temp);
                 }
 
                 Instr::Call(name.clone(), instrs, None)
             }
-            ast::L1ExpressionInner::Variable(v) => Instr::Copy(Value::Temporary(v.clone())),
+            ast::L1ExpressionInner::Variable(v) => {
+                // if self.local_defs.contains(v) {
+                //     Instr::Load(self.tt(&expr.ty).unwrap(), Value::Temporary(v.clone()))
+                // } else {
+                //     Instr::Copy(Value::Temporary(v.clone()))
+                // }
+                Instr::Load(
+                    self.tt(&expr.ty).unwrap().into_base(),
+                    Value::Temporary(v.clone()),
+                )
+            }
             ast::L1ExpressionInner::ArrayAccess { name, index } => todo!(),
             ast::L1ExpressionInner::BinOp { lhs, op, rhs } => {
                 let exp1 = self.gen_expr(lhs);
@@ -282,22 +445,94 @@ impl QbeBackend {
                     ast::BinOp::NotEqual => Instr::Cmp(ty, Cmp::Ne, v1, v2),
                     ast::BinOp::And => todo!(),
                     ast::BinOp::Or => todo!(),
-                    ast::BinOp::BitwiseAnd => Instr::Add(v1, v2),
+                    ast::BinOp::BitwiseAnd => Instr::And(v1, v2),
                     ast::BinOp::BitwiseOr => Instr::Or(v1, v2),
                     ast::BinOp::Xor => Instr::Xor(v1, v2),
                     ast::BinOp::Lsh => Instr::Shl(v1, v2),
                     ast::BinOp::Rsh => Instr::Shr(v1, v2),
                 }
             }
-            ast::L1ExpressionInner::StructInit { name, fields } => todo!(),
-            ast::L1ExpressionInner::FieldAccess { expr, field } => todo!(),
+            ast::L1ExpressionInner::StructInit { name, fields } => {
+                todo!();
+            }
+            ast::L1ExpressionInner::Field(_) => unreachable!(),
+            ast::L1ExpressionInner::FieldAccess { expr, field } => {
+                let v = match &expr.expr {
+                    L1ExpressionInner::Variable(v) => v,
+                    L1ExpressionInner::Deref(v) => v.to_var_name().expect("Not a variable"),
+                    _ => unreachable!(),
+                };
+                let real_addr = self
+                    .assign_new_temp(
+                        Instr::Load(Type::Long, Value::Temporary(v.clone())),
+                        Type::Long,
+                    )
+                    .1;
+
+                match &expr.ty {
+                    L1Type::Struct(s) => {
+                        let st = self.st_lookup.get(s).unwrap();
+
+                        match &field.expr {
+                            L1ExpressionInner::Field(f) => {
+                                let offset = self.calc_offset(st, f);
+                                let access = Instr::Add(real_addr, Value::Const(offset));
+                                let offset_addr = self.assign_new_temp(access, Type::Long);
+
+                                return Instr::Load(offset_addr.0.into_base(), offset_addr.1);
+                            }
+                            L1ExpressionInner::FnCall { name, args } => todo!(),
+                            _ => unreachable!(),
+                        }
+                    }
+                    L1Type::Ptr(ptr) => match **ptr {
+                        L1Type::Struct(ref s) => {
+                            // let real_addr = if self.local_defs.contains(v) {
+                            //     self.assign_new_temp(
+                            //         Instr::Load(Type::Long, Value::Temporary(v.clone())),
+                            //         Type::Long,
+                            //     )
+                            //     .1
+                            // } else {
+                            //     Value::Temporary(v.clone())
+                            // };
+
+                            let st = self.st_lookup.get(s).unwrap();
+                            match &field.expr {
+                                L1ExpressionInner::Field(f) => {
+                                    let offset = self.calc_offset(st, f);
+                                    let access = Instr::Add(real_addr, Value::Const(offset));
+                                    let offset_addr = self.assign_new_temp(access, Type::Long);
+
+                                    return Instr::Load(offset_addr.0.into_base(), offset_addr.1);
+                                }
+                                L1ExpressionInner::FnCall { name, args } => todo!(),
+                                _ => unreachable!(),
+                            }
+                        }
+                        _ => todo!(),
+                    },
+                    t => todo!("{t:?}"),
+                }
+            }
             ast::L1ExpressionInner::Deref(l1_expression) => {
                 let expr = self.gen_expr(&l1_expression);
 
                 let val = self.assign_new_temp(expr, self.tt(&l1_expression.ty).unwrap());
 
-                Instr::Load(val.0, val.1)
+                Instr::Load(val.0.into_base(), val.1)
             }
+            ast::L1ExpressionInner::Ref(l1_expression) => match &l1_expression.expr {
+                ast::L1ExpressionInner::Int(i) => Instr::Copy(Value::Const(*i)),
+                ast::L1ExpressionInner::Variable(var) => Instr::Copy(Value::Temporary(var.clone())),
+                ast::L1ExpressionInner::Deref(l1_expression) => {
+                    let expr = self.gen_expr(&l1_expression);
+                    let var = self.assign_new_temp(expr, self.tt(&l1_expression.ty).unwrap());
+
+                    Instr::Copy(var.1)
+                }
+                _ => todo!(),
+            },
         }
     }
 
@@ -306,7 +541,7 @@ impl QbeBackend {
             .map(|arg| {
                 (
                     self.tt(&arg.ty).unwrap(),
-                    Value::Temporary(arg.name.to_string()),
+                    Value::Temporary(format!("{}.arg", arg.name)),
                 )
             })
             .collect()
@@ -327,9 +562,10 @@ impl QbeBackend {
             L1Type::Char => Type::Byte,
             L1Type::Struct(s) => {
                 Type::Aggregate(self.l1struct_to_typedef(self.st_lookup.get(s).unwrap()))
+                // Type::Long
             }
             L1Type::Enum(_) => todo!("Codegen enums"),
-            L1Type::Arr(l1_type) => Type::Long,
+            L1Type::Arr(_) => Type::Long,
             L1Type::Variadic(l1_type) => todo!(),
             L1Type::Fn { name, args, ret } => Type::Long,
             L1Type::Ptr(l1_type) => Type::Long,
@@ -341,14 +577,99 @@ impl QbeBackend {
     }
 
     fn l1struct_to_typedef(&self, st: &L1Struct) -> TypeDef {
+        let mut max_size = 0;
+        for field in &st.fields {
+            let size = self.type_size(&field.ty);
+            if size > max_size {
+                max_size = size;
+            }
+        }
+
         TypeDef {
             name: st.name.clone(),
-            align: None,
+            align: Some(max_size),
             items: st
                 .fields
                 .iter()
                 .map(|x| (self.tt(&x.ty).unwrap(), 1))
                 .collect(),
         }
+    }
+
+    fn type_size(&self, ty: &L1Type) -> u64 {
+        match ty {
+            L1Type::U8 | L1Type::I8 => 1,
+            L1Type::U16 | L1Type::I16 => 2,
+            L1Type::U32 | L1Type::I32 => 4,
+            L1Type::U64 | L1Type::I64 => 8,
+            L1Type::F32 => 4,
+            L1Type::F64 => 8,
+            L1Type::Bool => 1,
+            L1Type::Char => 1,
+            L1Type::Str => 8,
+            L1Type::Struct(s) => {
+                let st = self.st_lookup.get(s).unwrap();
+
+                let alignment = self.alignment(st);
+
+                alignment * st.fields.len() as u64
+            }
+            L1Type::Enum(_) => todo!(),
+            L1Type::Ptr(l1_type) => 8,
+            L1Type::Arr(l1_type) => todo!(),
+            L1Type::Variadic(l1_type) => todo!(),
+            L1Type::Fn { name, args, ret } => todo!(),
+            L1Type::Interface { symbols } => todo!(),
+            L1Type::Void => todo!(),
+            L1Type::Backpatch(_) => unreachable!(),
+            L1Type::Unknown => unreachable!(),
+        }
+    }
+
+    fn type_base_size(&self, ty: &L1Type) -> u64 {
+        match ty {
+            L1Type::U8 | L1Type::I8 => 1,
+            L1Type::U16 | L1Type::I16 => 2,
+            L1Type::U32 | L1Type::I32 => 4,
+            L1Type::U64 | L1Type::I64 => 8,
+            L1Type::F32 => 4,
+            L1Type::F64 => 8,
+            L1Type::Bool => 1,
+            L1Type::Char => 1,
+            L1Type::Str => 8,
+            L1Type::Struct(_) => 8,
+            L1Type::Enum(_) => 8,
+            L1Type::Ptr(l1_type) => 8,
+            L1Type::Arr(l1_type) => todo!(),
+            L1Type::Variadic(l1_type) => todo!(),
+            L1Type::Fn { name, args, ret } => todo!(),
+            L1Type::Interface { symbols } => todo!(),
+            L1Type::Void => todo!(),
+            L1Type::Backpatch(_) => unreachable!(),
+            L1Type::Unknown => unreachable!(),
+        }
+    }
+
+    fn calc_offset(&self, st: &L1Struct, f: &String) -> u64 {
+        let mut offset = 0;
+        let alignment = self.alignment(st);
+        for field in &st.fields {
+            if f == &field.name {
+                return offset;
+            }
+            offset += alignment;
+        }
+        offset
+    }
+
+    fn alignment(&self, st: &L1Struct) -> u64 {
+        let mut alignment = 0;
+        for field in &st.fields {
+            let size = self.type_size(&field.ty);
+            if size > alignment {
+                alignment = size;
+            }
+        }
+        alignment
     }
 }

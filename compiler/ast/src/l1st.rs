@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, hash::Hash};
 
 pub type SymbolTable = HashMap<String, Symbol>;
 
@@ -133,6 +133,16 @@ impl L1Type {
             _ => None,
         }
     }
+
+    pub fn can_assign(&self, value: &Self) -> bool {
+        match (self, value) {
+            (Ptr(_), Ptr(_)) => true,
+            (t1, t2) if t1 == t2 => true,
+            (Ptr(_), U64 | U32 | U16 | U8) => true,
+            (U64, Ptr(_)) => true,
+            _ => false,
+        }
+    }
 }
 
 impl<'a> From<&'a str> for L1Type {
@@ -219,17 +229,23 @@ pub enum L1Value {
 #[derive(Debug, Clone)]
 pub struct L1Block {
     pub statements: Vec<L1Statement>,
+    pub scope: HashMap<String, L1Type>,
 }
 
 impl L1Block {
-    pub fn new() -> Self {
+    pub fn new(current_scope: HashMap<String, L1Type>) -> Self {
         Self {
             statements: Vec::new(),
+            scope: current_scope,
         }
     }
 
     pub fn push(&mut self, statement: L1Statement) {
         self.statements.push(statement);
+    }
+
+    pub fn scope(&mut self, name: String, ty: L1Type) {
+        self.scope.insert(name, ty);
     }
 }
 
@@ -266,6 +282,32 @@ pub struct L1Expression {
     pub expr: L1ExpressionInner,
 }
 
+impl L1Expression {
+    pub fn to_field_name(&self) -> Result<&String, ()> {
+        match &self.expr {
+            L1ExpressionInner::Field(f) => Ok(f),
+            _ => Err(()),
+        }
+    }
+
+    pub fn to_var_name(&self) -> Result<&String, ()> {
+        match &self.expr {
+            L1ExpressionInner::Variable(f) => Ok(f),
+            _ => Err(()),
+        }
+    }
+
+    pub fn to_deref_var_name(&self) -> Result<&String, ()> {
+        match &self.expr {
+            L1ExpressionInner::Deref(e) => match &e.expr {
+                L1ExpressionInner::Variable(v) => Ok(v),
+                _ => Err(()),
+            },
+            _ => Err(()),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum L1ExpressionInner {
     // TODO: Add negative number types
@@ -273,6 +315,7 @@ pub enum L1ExpressionInner {
     Float(f64),
     Str(String),
     Bool(bool),
+    Null,
     This, // Represented as Self in the language
     Array(Vec<L1Expression>),
     FnCall {
@@ -280,6 +323,7 @@ pub enum L1ExpressionInner {
         args: Vec<L1NamedExpr>,
     },
     Variable(String),
+    Field(String),
     ArrayAccess {
         name: String,
         index: Box<L1Expression>,
@@ -298,6 +342,7 @@ pub enum L1ExpressionInner {
         field: Box<L1Expression>,
     },
     Deref(Box<L1Expression>),
+    Ref(Box<L1Expression>),
 }
 
 #[derive(Debug, Clone)]

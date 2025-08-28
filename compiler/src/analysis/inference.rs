@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use ast::{L1ArgField, L1Ast, L1Block, L1Expression, L1Type};
+use ast::{L1ArgField, L1Ast, L1Block, L1Expression, L1ExpressionInner, L1Struct, L1Type};
 use indexmap::IndexMap;
 
 #[derive(Debug)]
@@ -13,15 +13,18 @@ pub enum InferenceError {
     NoSymbol,
     UndeclaredVariable,
     DerefNoPtr,
+    InvalidFieldAccess,
 }
 
 pub struct Inference {
     ty_table: HashMap<String, L1Type>,
+    st_lookup: HashMap<String, L1Struct>,
 }
 
 impl Inference {
     pub fn new(ast: &mut L1Ast) -> Self {
         let mut map = HashMap::new();
+        let mut st_lookup = HashMap::new();
         for (_, symbol) in &ast.symbols {
             match symbol {
                 ast::Symbol::Struct(l1_struct) => {
@@ -29,6 +32,7 @@ impl Inference {
                         l1_struct.name.clone(),
                         L1Type::Struct(l1_struct.name.clone()),
                     );
+                    st_lookup.insert(l1_struct.name.clone(), l1_struct.clone());
                 }
                 ast::Symbol::Enum(l1_enum) => {
                     map.insert(l1_enum.name.clone(), L1Type::Enum(l1_enum.name.clone()));
@@ -71,7 +75,10 @@ impl Inference {
                 }
             }
         }
-        Self { ty_table: map }
+        Self {
+            ty_table: map,
+            st_lookup,
+        }
     }
 
     pub fn infer_types(&self, ast: &mut L1Ast) -> Result<(), InferenceError> {
@@ -117,8 +124,10 @@ impl Inference {
                         return Err(InferenceError::DefWithoutType);
                     }
 
-                    stack.insert(var.name.clone(), var.ty.clone());
-                    scoped_pushes += 1;
+                    let redeclr = stack.insert(var.name.clone(), var.ty.clone()).is_some();
+                    if !redeclr {
+                        scoped_pushes += 1;
+                    }
                 }
                 ast::L1Statement::FnDef(_) => unreachable!(),
                 ast::L1Statement::ExternFnDeclr(_) => unreachable!(),
@@ -233,15 +242,54 @@ impl Inference {
                     return Err(InferenceError::NoSymbol);
                 }
             }
+            ast::L1ExpressionInner::Field(_) => todo!(),
             ast::L1ExpressionInner::FieldAccess { expr, field } => {
                 self.infer_expr_ty(expr, stack)?;
-                self.infer_expr_ty(field, stack)?;
 
-                if expr.ty == field.ty {
-                    expr.ty.clone()
-                } else {
-                    return Err(InferenceError::FieldAccessTypeImparity);
+                match expr.ty.clone() {
+                    L1Type::Struct(ref s) => {
+                        let st = self.st_lookup.get(s).unwrap();
+
+                        match &field.expr {
+                            L1ExpressionInner::Field(v) => {
+                                for f in &st.fields {
+                                    if &f.name == v {
+                                        field.ty = f.ty.clone();
+                                        break;
+                                    }
+                                }
+                                if field.ty == L1Type::Unknown {
+                                    return Err(InferenceError::InvalidFieldAccess);
+                                }
+                            }
+                            _ => todo!(),
+                        }
+                    }
+                    L1Type::Ptr(ty) => match *ty {
+                        L1Type::Struct(ref s) => {
+                            let st = self.st_lookup.get(s).unwrap();
+
+                            match &field.expr {
+                                L1ExpressionInner::Field(v) => {
+                                    for f in &st.fields {
+                                        if &f.name == v {
+                                            field.ty = f.ty.clone();
+                                            break;
+                                        }
+                                    }
+                                    if field.ty == L1Type::Unknown {
+                                        return Err(InferenceError::InvalidFieldAccess);
+                                    }
+                                }
+                                _ => todo!(),
+                            }
+                        }
+                        _ => todo!(),
+                    },
+                    t => todo!("{:?}", t),
                 }
+
+                field.ty.clone()
             }
             ast::L1ExpressionInner::Deref(l1_expression) => {
                 self.infer_expr_ty(l1_expression, stack)?;
@@ -251,6 +299,12 @@ impl Inference {
                     _ => return Err(InferenceError::DerefNoPtr),
                 }
             }
+            ast::L1ExpressionInner::Ref(l1_expression) => {
+                self.infer_expr_ty(l1_expression, stack)?;
+
+                L1Type::Ptr(l1_expression.ty.clone().into())
+            }
+            ast::L1ExpressionInner::Null => L1Type::Ptr(L1Type::Void.into()),
         };
 
         expr.ty = ty;

@@ -7,4 +7,5 @@ edition = "2024"
 codespan-reporting = "0.12.0"
 codegen = { path = "./codegen" }
 ast = { path = "./ast" }
+vm = { path = "./vm" }
 indexmap = "2.11.0"

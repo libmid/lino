@@ -1,0 +1,55 @@
+def printf();
+def malloc() *Node;
+
+def Node {
+    i64 data,
+    *Node next,
+}
+
+def insert(*Node head, i64 value) *Node {
+    def original_head = head;
+
+    def new_node = malloc(16);
+    new_node.data = value;
+    new_node.next = null;
+
+    if head == null {
+        return new_node;
+    }
+
+    while head.next != null {
+        head = head.next;
+    }
+    head.next = new_node;
+
+    return original_head;
+}
+
+def traverse(*Node head) {
+    while head != null {
+        printf("%d->", head.data);
+        head = head.next;
+    }
+
+    printf("NULL\n");
+}
+
+def print_node(Node n) {
+    printf("[%d | %p]\n", n.data, n.next);
+}
+
+def main() i32 {
+    def head: *Node = null;
+
+    def i = 1;
+    while i <= 5 {
+        head = insert(head, i*2);
+        i = i + 1;
+    }
+
+    traverse(head);
+    printf("First Node: ");
+    print_node(*head);
+
+    return 0;
+}

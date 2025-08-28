@@ -1079,7 +1079,7 @@ impl Linkage {
 impl fmt::Display for Linkage {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         if self.exported {
-            write!(f, "export ")?;
+            write!(f, "\nexport ")?;
         }
         if self.thread_local {
             write!(f, "thread ")?;

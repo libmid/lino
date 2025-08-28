@@ -1,3 +1,5 @@
+use std::{collections::HashMap, hash::Hash};
+
 use crate::{
     TokenKind,
     lexer::{Keyword, TokenKind::*, Value},
@@ -161,7 +163,10 @@ impl<'a> L1Parser<'a> {
                     _ => {}
                 }
 
-                let block = self.parse_block()?;
+                // Function has a block, create a scope for the variables
+                let scope = HashMap::new();
+
+                let block = self.parse_block(scope)?;
 
                 let func = L1Fn {
                     name,
@@ -476,25 +481,28 @@ impl<'a> L1Parser<'a> {
         Ok(val)
     }
 
-    fn parse_block(&mut self) -> Result<L1Block> {
+    fn parse_block(&mut self, current_scope: HashMap<String, L1Type>) -> Result<L1Block> {
         self.match_token(CurlyBracesOpen)?;
 
-        let mut statements = vec![];
-
+        let mut block = L1Block::new(current_scope);
         while self.peek()?.kind != CurlyBracesClose {
-            statements.push(self.parse_statement()?);
+            let statement = self.parse_statement(&block.scope)?;
+            if let L1Statement::Declaration { var, value: _ } = &statement {
+                block.scope(var.name.clone(), var.ty.clone());
+            }
+            block.push(statement);
         }
 
         self.match_token(CurlyBracesClose)?;
 
-        Ok(L1Block { statements })
+        Ok(block)
     }
 
-    fn parse_statement(&mut self) -> Result<L1Statement> {
+    fn parse_statement(&mut self, scope: &HashMap<String, L1Type>) -> Result<L1Statement> {
         let kind = &self.peek()?.kind.clone();
 
         let statement = match kind {
-            CurlyBracesOpen => L1Statement::Block(self.parse_block()?),
+            CurlyBracesOpen => L1Statement::Block(self.parse_block(scope.clone())?),
             Keyword(key) => match key {
                 Keyword::Def => {
                     let statement = self.parse_def()?;
@@ -517,12 +525,12 @@ impl<'a> L1Parser<'a> {
                     }
                 }
                 Keyword::While => {
-                    let statement = self.parse_while()?;
+                    let statement = self.parse_while(scope.clone())?;
 
                     L1Statement::While(statement)
                 }
                 Keyword::If => {
-                    let statement = self.parse_if()?;
+                    let statement = self.parse_if(scope.clone())?;
 
                     L1Statement::If(statement)
                 }
@@ -553,12 +561,12 @@ impl<'a> L1Parser<'a> {
         Ok(statement)
     }
 
-    fn parse_while(&mut self) -> Result<L1While> {
+    fn parse_while(&mut self, scope: HashMap<String, L1Type>) -> Result<L1While> {
         self.match_keyword(Keyword::While)?;
 
         let expr = self.parse_expr()?;
 
-        let block = self.parse_block()?;
+        let block = self.parse_block(scope)?;
 
         Ok(L1While {
             condition: expr,
@@ -566,12 +574,12 @@ impl<'a> L1Parser<'a> {
         })
     }
 
-    fn parse_if(&mut self) -> Result<L1If> {
+    fn parse_if(&mut self, scope: HashMap<String, L1Type>) -> Result<L1If> {
         self.match_keyword(Keyword::If)?;
 
         let expr = self.parse_expr()?;
 
-        let if_block = self.parse_block()?;
+        let if_block = self.parse_block(scope.clone())?;
 
         let mut else_block = None;
 
@@ -583,7 +591,7 @@ impl<'a> L1Parser<'a> {
                 }
                 _ => {
                     self.match_keyword(Keyword::Else)?;
-                    else_block = Some(self.parse_block()?);
+                    else_block = Some(self.parse_block(scope)?);
                 }
             },
             _ => {}
@@ -600,7 +608,7 @@ impl<'a> L1Parser<'a> {
     fn parse_expr(&mut self) -> Result<L1Expression> {
         let tok = self.peek()?;
 
-        let expr = match &tok.kind {
+        let mut expr = match &tok.kind {
             BraceOpen => {
                 self.match_token(BraceOpen)?;
                 let expr = self.parse_expr()?;
@@ -611,6 +619,14 @@ impl<'a> L1Parser<'a> {
                 let expr = L1Expression {
                     ty: L1Type::Bool,
                     expr: L1ExpressionInner::Bool(*b),
+                };
+                self.next().unwrap();
+                expr
+            }
+            Keyword(Keyword::Null) => {
+                let expr = L1Expression {
+                    ty: L1Type::Ptr(L1Type::Void.into()),
+                    expr: L1ExpressionInner::Null,
                 };
                 self.next().unwrap();
                 expr
@@ -687,9 +703,25 @@ impl<'a> L1Parser<'a> {
                     expr: L1ExpressionInner::Deref(self.parse_expr()?.into()),
                 }
             }
-            tok => {
+            And => {
+                self.match_token(And)?;
+
+                L1Expression {
+                    ty: L1Type::Unknown,
+                    expr: L1ExpressionInner::Ref(self.parse_expr()?.into()),
+                }
+            }
+            _tok => {
                 return Err(ParserError::InvalidExpr);
             }
+        };
+
+        match self.peek()?.kind {
+            Dot => {
+                let fa = self.parse_field_access(expr)?;
+                expr = fa;
+            }
+            _ => {}
         };
 
         match self.peek()?.kind {
@@ -709,8 +741,6 @@ impl<'a> L1Parser<'a> {
                     },
                 })
             }
-            Dot => self.parse_field_access(expr),
-
             _ => Ok(expr),
         }
     }
@@ -722,7 +752,7 @@ impl<'a> L1Parser<'a> {
             BraceOpen => self.parse_function_call()?,
             _ => L1Expression {
                 ty: L1Type::Unknown,
-                expr: L1ExpressionInner::Variable(self.match_iden()?),
+                expr: L1ExpressionInner::Field(self.match_iden()?),
             },
         };
 
