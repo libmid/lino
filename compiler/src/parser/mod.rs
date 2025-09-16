@@ -92,7 +92,7 @@ impl<'a> L1Parser<'a> {
         &mut self.ast
     }
 
-    fn next(&mut self) -> Option<&Token> {
+    fn next(&mut self) -> Option<&Token<'_>> {
         let tok: Option<&Token<'a>> = self.tokens.get(self.current_tok);
         self.current_tok += 1;
         tok
@@ -112,7 +112,7 @@ impl<'a> L1Parser<'a> {
             .ok_or(ParserError::EOF)
     }
 
-    fn match_token(&mut self, kind: TokenKind) -> Result<&Token> {
+    fn match_token(&mut self, kind: TokenKind) -> Result<&Token<'_>> {
         match self.next() {
             Some(tok) if tok.kind == kind => {
                 return Ok(tok);

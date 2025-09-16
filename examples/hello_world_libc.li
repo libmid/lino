@@ -1,4 +1,4 @@
-def printf(str buf, i32 n);
+def printf(str buf);
 
 def main() i32 {
     printf("Hello World!\n");

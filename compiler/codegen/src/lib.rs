@@ -1,7 +1,10 @@
+#![feature(box_patterns)]
+
+pub mod c;
 pub mod qbe;
 
 pub trait Backend {
-    fn generate(self, ast: &ast::L1Ast) -> String;
+    fn generate(&mut self, ast: &ast::L1Ast) -> String;
 }
 
 pub struct Codegen<T: Backend> {
@@ -13,7 +16,13 @@ impl<T: Backend> Codegen<T> {
         Self { backend }
     }
 
-    pub fn generate(self, ast: &ast::L1Ast) -> String {
+    pub fn generate(&mut self, ast: &ast::L1Ast) -> String {
         self.backend.generate(ast)
+    }
+}
+
+impl Backend for Box<dyn Backend> {
+    fn generate(&mut self, ast: &ast::L1Ast) -> String {
+        (**self).generate(ast)
     }
 }

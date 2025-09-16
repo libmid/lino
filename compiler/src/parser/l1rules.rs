@@ -1,4 +1,4 @@
-use std::{collections::HashMap, hash::Hash};
+use std::collections::HashMap;
 
 use crate::{
     TokenKind,
@@ -756,18 +756,28 @@ impl<'a> L1Parser<'a> {
             },
         };
 
+        let e2 = match self.peek()?.kind {
+            Dot => self.parse_field_access(field), // TODO: DO domething about array access
+            ref x => {
+                return Ok(L1Expression {
+                    ty: L1Type::Unknown,
+                    expr: L1ExpressionInner::FieldAccess {
+                        expr: Box::new(lhs),
+                        field: Box::new(field),
+                    },
+                });
+            }
+        }?;
+
         let expr = L1Expression {
             ty: L1Type::Unknown,
             expr: L1ExpressionInner::FieldAccess {
                 expr: Box::new(lhs),
-                field: Box::new(field),
+                field: Box::new(e2),
             },
         };
 
-        match self.peek()?.kind {
-            Dot => self.parse_field_access(expr), // TODO: DO domething about array access
-            _ => Ok(expr),
-        }
+        Ok(expr)
     }
 
     fn parse_function_call(&mut self) -> Result<L1Expression> {

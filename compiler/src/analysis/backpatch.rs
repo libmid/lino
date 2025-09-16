@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 
 use ast::{L1Ast, L1Block, L1Fn, L1FnDeclr, L1Statement, L1Struct, L1Type, SymbolTable};
 

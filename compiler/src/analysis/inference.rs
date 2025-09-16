@@ -244,13 +244,15 @@ impl Inference {
             }
             ast::L1ExpressionInner::Field(_) => todo!(),
             ast::L1ExpressionInner::FieldAccess { expr, field } => {
-                self.infer_expr_ty(expr, stack)?;
+                if expr.ty == L1Type::Unknown {
+                    self.infer_expr_ty(expr, stack)?;
+                }
 
                 match expr.ty.clone() {
-                    L1Type::Struct(ref s) => {
+                    L1Type::Struct(ref s) | L1Type::Ptr(box L1Type::Struct(ref s)) => {
                         let st = self.st_lookup.get(s).unwrap();
 
-                        match &field.expr {
+                        match &mut field.expr {
                             L1ExpressionInner::Field(v) => {
                                 for f in &st.fields {
                                     if &f.name == v {
@@ -262,30 +264,25 @@ impl Inference {
                                     return Err(InferenceError::InvalidFieldAccess);
                                 }
                             }
-                            _ => todo!(),
-                        }
-                    }
-                    L1Type::Ptr(ty) => match *ty {
-                        L1Type::Struct(ref s) => {
-                            let st = self.st_lookup.get(s).unwrap();
-
-                            match &field.expr {
-                                L1ExpressionInner::Field(v) => {
+                            L1ExpressionInner::FieldAccess { expr, field: _ } => match expr.expr {
+                                L1ExpressionInner::Field(ref second_field) => {
                                     for f in &st.fields {
-                                        if &f.name == v {
-                                            field.ty = f.ty.clone();
+                                        if &f.name == second_field {
+                                            expr.ty = f.ty.clone();
                                             break;
                                         }
                                     }
-                                    if field.ty == L1Type::Unknown {
+                                    if expr.ty == L1Type::Unknown {
                                         return Err(InferenceError::InvalidFieldAccess);
                                     }
+
+                                    self.infer_expr_ty(field, stack)?;
                                 }
                                 _ => todo!(),
-                            }
+                            },
+                            _ => todo!(),
                         }
-                        _ => todo!(),
-                    },
+                    }
                     t => todo!("{:?}", t),
                 }
 

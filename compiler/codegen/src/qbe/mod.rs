@@ -1,10 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::Backend;
-use ast::{
-    L1Arg, L1Block, L1Expression, L1ExpressionInner, L1Fn, L1Statement, L1Struct, L1Type,
-    L1Variable,
-};
+use ast::{L1Arg, L1Block, L1Expression, L1ExpressionInner, L1Fn, L1Statement, L1Struct, L1Type};
 use qubers::{Cmp, DataDef, DataItem, Function, Instr, Linkage, Module, Type, TypeDef, Value};
 
 pub struct QbeBackend {
@@ -19,20 +16,20 @@ pub struct QbeBackend {
 }
 
 impl Backend for QbeBackend {
-    fn generate(mut self, ast: &ast::L1Ast) -> String {
-        for (name, symbol) in &ast.symbols {
+    fn generate(&mut self, ast: &ast::L1Ast) -> String {
+        for (_, symbol) in &ast.symbols {
             match symbol {
                 ast::Symbol::Struct(l1_struct) => {
                     self.st_lookup
                         .insert(l1_struct.name.clone(), l1_struct.clone());
                 }
-                ast::Symbol::Enum(l1_enum) => todo!(),
-                ast::Symbol::FnDeclr(l1_fn_declr) => {}
+                ast::Symbol::Enum(_) => todo!(),
+                ast::Symbol::FnDeclr(_) => {}
                 ast::Symbol::Fn(l1_fn) => {}
             }
         }
 
-        for (name, symbol) in &ast.symbols {
+        for (_, symbol) in &ast.symbols {
             match symbol {
                 ast::Symbol::Struct(l1_struct) => {
                     let def = self.l1struct_to_typedef(&l1_struct);
@@ -181,6 +178,10 @@ impl QbeBackend {
                                 .add_instr(Instr::Store(rty.into_base(), lhsi, rhsi));
                         }
                         ast::L1ExpressionInner::FieldAccess { expr: e, field } => {
+                            if let L1ExpressionInner::FieldAccess { expr, field } = &e.expr {
+                                dbg!(e, field);
+                            }
+
                             let var = e
                                 .to_var_name()
                                 // .unwrap_or_else(e.to_deref_var_name)
@@ -208,15 +209,6 @@ impl QbeBackend {
                                             let offset = self
                                                 .calc_offset(st, field.to_field_name().unwrap());
 
-                                            // let actual_addr = if self.local_defs.contains(&var) {
-                                            //     self.assign_new_temp(
-                                            //         Instr::Load(Type::Long, Value::Temporary(var)),
-                                            //         Type::Long,
-                                            //     )
-                                            //     .1
-                                            // } else {
-                                            //     Value::Temporary(var)
-                                            // };
                                             let actual_addr = self
                                                 .assign_new_temp(
                                                     Instr::Load(Type::Long, Value::Temporary(var)),
@@ -246,15 +238,6 @@ impl QbeBackend {
                                         let offset =
                                             self.calc_offset(st, field.to_field_name().unwrap());
 
-                                        // let actual_addr = if self.local_defs.contains(&var) {
-                                        //     self.assign_new_temp(
-                                        //         Instr::Load(Type::Long, Value::Temporary(var)),
-                                        //         Type::Long,
-                                        //     )
-                                        //     .1
-                                        // } else {
-                                        //     Value::Temporary(var)
-                                        // };
                                         let actual_addr = self
                                             .assign_new_temp(
                                                 Instr::Load(Type::Long, Value::Temporary(var)),
@@ -457,11 +440,53 @@ impl QbeBackend {
             }
             ast::L1ExpressionInner::Field(_) => unreachable!(),
             ast::L1ExpressionInner::FieldAccess { expr, field } => {
+                match (&expr.expr, &field.expr) {
+                    (L1ExpressionInner::Field(_), L1ExpressionInner::Field(f)) => {
+                        if let L1Type::Struct(s) = &expr.ty {
+                            let st = self.st_lookup.get(s).unwrap();
+
+                            let offset = self.calc_offset(st, f);
+                            return Instr::Copy(Value::Const(offset));
+                        }
+                        unreachable!()
+                    }
+                    (
+                        L1ExpressionInner::Field(f),
+                        L1ExpressionInner::FieldAccess { expr: expr2, field },
+                    ) => {
+                        let offset_to_add_instr = self.gen_expr(field);
+                        let offset_to_add = self.assign_new_temp(offset_to_add_instr, Type::Long);
+
+                        let mut secondery_offset = 0;
+                        match &expr2.expr {
+                            L1ExpressionInner::Field(f) => {
+                                if let L1Type::Struct(s) = &expr.ty {
+                                    let st = self.st_lookup.get(s).unwrap();
+                                    secondery_offset = self.calc_offset(st, f);
+                                }
+                            }
+                            _ => todo!(),
+                        }
+
+                        if let L1Type::Struct(s) = &expr2.ty {
+                            let st = self.st_lookup.get(s).unwrap();
+
+                            return Instr::Add(
+                                Value::Const(self.calc_offset(st, f) + secondery_offset),
+                                offset_to_add.1,
+                            );
+                        }
+                        unreachable!()
+                    }
+                    _ => {}
+                };
+
                 let v = match &expr.expr {
                     L1ExpressionInner::Variable(v) => v,
                     L1ExpressionInner::Deref(v) => v.to_var_name().expect("Not a variable"),
                     _ => unreachable!(),
                 };
+
                 let real_addr = self
                     .assign_new_temp(
                         Instr::Load(Type::Long, Value::Temporary(v.clone())),
@@ -470,7 +495,7 @@ impl QbeBackend {
                     .1;
 
                 match &expr.ty {
-                    L1Type::Struct(s) => {
+                    L1Type::Struct(s) | L1Type::Ptr(box L1Type::Struct(s)) => {
                         let st = self.st_lookup.get(s).unwrap();
 
                         match &field.expr {
@@ -481,37 +506,26 @@ impl QbeBackend {
 
                                 return Instr::Load(offset_addr.0.into_base(), offset_addr.1);
                             }
-                            L1ExpressionInner::FnCall { name, args } => todo!(),
+                            L1ExpressionInner::FieldAccess { expr: e2, field: _ } => {
+                                let f = e2.to_field_name().expect("Not a field name");
+                                let offset = self.calc_offset(st, f);
+
+                                let first_access = Instr::Add(real_addr, Value::Const(offset));
+                                let first_temp = self.assign_new_temp(first_access, Type::Long);
+
+                                let next_access_offset = self.gen_expr(field);
+                                let next_access_offset_temp =
+                                    self.assign_new_temp(next_access_offset, Type::Long);
+
+                                let next_access =
+                                    Instr::Add(first_temp.1, next_access_offset_temp.1);
+                                let offset_addr = self.assign_new_temp(next_access, Type::Long);
+
+                                return Instr::Load(offset_addr.0.into_base(), offset_addr.1);
+                            }
                             _ => unreachable!(),
                         }
                     }
-                    L1Type::Ptr(ptr) => match **ptr {
-                        L1Type::Struct(ref s) => {
-                            // let real_addr = if self.local_defs.contains(v) {
-                            //     self.assign_new_temp(
-                            //         Instr::Load(Type::Long, Value::Temporary(v.clone())),
-                            //         Type::Long,
-                            //     )
-                            //     .1
-                            // } else {
-                            //     Value::Temporary(v.clone())
-                            // };
-
-                            let st = self.st_lookup.get(s).unwrap();
-                            match &field.expr {
-                                L1ExpressionInner::Field(f) => {
-                                    let offset = self.calc_offset(st, f);
-                                    let access = Instr::Add(real_addr, Value::Const(offset));
-                                    let offset_addr = self.assign_new_temp(access, Type::Long);
-
-                                    return Instr::Load(offset_addr.0.into_base(), offset_addr.1);
-                                }
-                                L1ExpressionInner::FnCall { name, args } => todo!(),
-                                _ => unreachable!(),
-                            }
-                        }
-                        _ => todo!(),
-                    },
                     t => todo!("{t:?}"),
                 }
             }
@@ -531,7 +545,7 @@ impl QbeBackend {
 
                     Instr::Copy(var.1)
                 }
-                _ => todo!(),
+                t => todo!("Can't generate reference for {t:?}"),
             },
         }
     }
@@ -577,17 +591,17 @@ impl QbeBackend {
     }
 
     fn l1struct_to_typedef(&self, st: &L1Struct) -> TypeDef {
-        let mut max_size = 0;
-        for field in &st.fields {
-            let size = self.type_size(&field.ty);
-            if size > max_size {
-                max_size = size;
-            }
-        }
+        // let mut max_size = 0;
+        // for field in &st.fields {
+        //     let size = self.type_size(&field.ty);
+        //     if size > max_size {
+        //         max_size = size;
+        //     }
+        // }
 
         TypeDef {
             name: st.name.clone(),
-            align: Some(max_size),
+            align: None,
             items: st
                 .fields
                 .iter()

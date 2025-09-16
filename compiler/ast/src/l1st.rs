@@ -1,4 +1,4 @@
-use std::{collections::HashMap, hash::Hash};
+use std::{collections::HashMap};
 
 pub type SymbolTable = HashMap<String, Symbol>;
 
@@ -24,9 +24,9 @@ impl From<&Symbol> for L1Type {
     fn from(value: &Symbol) -> Self {
         match value {
             Symbol::Struct(l1_struct) => L1Type::Struct(l1_struct.name.clone()),
-            Symbol::Enum(l1_enum) => todo!("L1Enum to L1type"),
-            Symbol::FnDeclr(l1_fn_declr) => todo!(),
-            Symbol::Fn(l1_fn) => todo!(),
+            Symbol::Enum(_l1_enum) => todo!("L1Enum to L1type"),
+            Symbol::FnDeclr(_l1_fn_declr) => todo!(),
+            Symbol::Fn(_l1_fn) => todo!(),
         }
     }
 }
@@ -35,7 +35,7 @@ impl From<Symbol> for L1Type {
     fn from(value: Symbol) -> Self {
         match value {
             Symbol::Struct(l1_struct) => L1Type::Struct(l1_struct.name.clone()),
-            Symbol::Enum(l1_enum) => todo!("L1Enum to L1type"),
+            Symbol::Enum(_l1_enum) => todo!("L1Enum to L1type"),
             Symbol::FnDeclr(l1_fn_declr) => L1Type::Fn {
                 name: l1_fn_declr.name,
                 args: l1_fn_declr
@@ -380,6 +380,32 @@ pub enum BinOp {
     Xor,
     Lsh,
     Rsh,
+}
+
+impl ToString for BinOp {
+    fn to_string(&self) -> String {
+        match self {
+            BinOp::Addition => "+",
+            BinOp::Subtraction => "-",
+            BinOp::Multiplication => "*",
+            BinOp::Division => "/",
+            BinOp::Modulus => "%",
+            BinOp::LessThan => "<",
+            BinOp::LessThanOrEqual => "<=",
+            BinOp::GreaterThan => ">",
+            BinOp::GreaterThanOrEqual => ">=",
+            BinOp::Equal => "==",
+            BinOp::NotEqual => "!=",
+            BinOp::And => "&&",
+            BinOp::BitwiseAnd => "&",
+            BinOp::Or => "||",
+            BinOp::BitwiseOr => "|",
+            BinOp::Xor => "^",
+            BinOp::Lsh => "<<",
+            BinOp::Rsh => ">>",
+        }
+        .into()
+    }
 }
 
 #[derive(Debug, Clone)]

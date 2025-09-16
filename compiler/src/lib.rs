@@ -1,9 +1,12 @@
+#![feature(box_patterns)]
+
 use std::fs::File;
 use std::io::Write;
 use std::path::PathBuf;
 
-use codegen::Codegen;
+use codegen::c::CBackend;
 use codegen::qbe::QbeBackend;
+use codegen::{Backend, Codegen};
 use codespan_reporting::diagnostic::{Diagnostic, Label};
 use codespan_reporting::files::SimpleFiles;
 use codespan_reporting::term;
@@ -17,8 +20,10 @@ mod analysis;
 mod lexer;
 mod parser;
 
+#[derive(Debug)]
 pub enum Target {
     Qbe,
+    C,
 }
 
 #[derive(Debug)]
@@ -26,6 +31,7 @@ pub struct CompilerOptions {
     print_output_flag: bool,
     stdlib: Option<PathBuf>,
     output_file: PathBuf,
+    target: Target,
 }
 
 impl Default for CompilerOptions {
@@ -34,6 +40,7 @@ impl Default for CompilerOptions {
             print_output_flag: Default::default(),
             stdlib: Default::default(),
             output_file: "build/out.ssa".into(),
+            target: Target::C,
         }
     }
 }
@@ -53,10 +60,14 @@ impl CompilerOptions {
         self.output_file = output_file.into();
         self
     }
+
+    pub fn backend(&mut self, target: Target) -> &mut Self {
+        self.target = target;
+        self
+    }
 }
 
 pub struct Compiler {
-    target: Target,
     input_file: PathBuf,
     input: String,
     options: CompilerOptions,
@@ -70,7 +81,6 @@ impl Compiler {
         });
 
         Self {
-            target: target,
             input_file,
             input,
             options,
@@ -106,19 +116,19 @@ impl Compiler {
         // TODO: Better error reporting
         l1p.parse().unwrap();
 
-        
         // Step 4: Backpatch types
         backpatch(l1p.get_ast()).unwrap();
-        
+
         // Step 7: Infer expression type
         let inference = Inference::new(l1p.get_ast());
         inference.infer_types(l1p.get_ast()).unwrap();
 
         // dbg!(l1p.get_ast());
-        
+
         // Step 9: Codegen
-        let cg = match self.target {
-            Target::Qbe => Codegen::new(QbeBackend::new()),
+        let mut cg: Codegen<Box<dyn Backend>> = match self.options.target {
+            Target::Qbe => Codegen::new(Box::new(QbeBackend::new())),
+            Target::C => Codegen::new(Box::new(CBackend::new())),
         };
 
         let output = cg.generate(&l1p.get_ast());
