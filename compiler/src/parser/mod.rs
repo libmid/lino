@@ -1,7 +1,7 @@
 use crate::{Token, TokenKind, lexer::Keyword, parser::error::ParserError};
 
 pub mod error;
-mod imports;
+pub mod imports;
 mod l1rules;
 
 use ast::{L1Ast, L1Statement};
@@ -92,27 +92,27 @@ impl<'a> L1Parser<'a> {
         &mut self.ast
     }
 
-    fn next(&mut self) -> Option<&Token<'_>> {
+    pub(crate) fn next(&mut self) -> Option<&Token<'_>> {
         let tok: Option<&Token<'a>> = self.tokens.get(self.current_tok);
         self.current_tok += 1;
         tok
     }
 
-    fn has_more(&'a self) -> bool {
+    pub(crate) fn has_more(&'a self) -> bool {
         self.peek().is_ok()
     }
 
-    fn peek(&self) -> Result<&Token<'a>> {
+    pub(crate) fn peek(&self) -> Result<&Token<'a>> {
         self.tokens.get(self.current_tok).ok_or(ParserError::EOF)
     }
 
-    fn peek_2(&self) -> Result<&Token<'a>> {
+    pub(crate) fn peek_2(&self) -> Result<&Token<'a>> {
         self.tokens
             .get(self.current_tok + 1)
             .ok_or(ParserError::EOF)
     }
 
-    fn match_token(&mut self, kind: TokenKind) -> Result<&Token<'_>> {
+    pub(crate) fn match_token(&mut self, kind: TokenKind) -> Result<&Token<'_>> {
         match self.next() {
             Some(tok) if tok.kind == kind => {
                 return Ok(tok);
@@ -126,12 +126,12 @@ impl<'a> L1Parser<'a> {
         }
     }
 
-    fn match_keyword(&mut self, keyword: Keyword) -> Result<()> {
+    pub(crate) fn match_keyword(&mut self, keyword: Keyword) -> Result<()> {
         self.match_token(TokenKind::Keyword(keyword))?;
         Ok(())
     }
 
-    fn match_iden(&mut self) -> Result<String> {
+    pub(crate) fn match_iden(&mut self) -> Result<String> {
         match self.next() {
             Some(tok) => match &tok.kind {
                 TokenKind::Identifier(iden) => Ok(iden.clone()),

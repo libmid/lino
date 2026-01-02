@@ -8,7 +8,7 @@ impl CBackend {
         format!(
             "{} {}({});",
             Self::l1type_to_c_type(&fn_declr.ret),
-            fn_declr.name,
+            fn_declr.name.replace(".", "_"),
             self.l1args_to_c_function_args(&fn_declr.args),
         )
     }

@@ -10,9 +10,9 @@ impl CBackend {
             Self::l1type_to_c_type(&l1fn.ret),
             self.prefix,
             if l1fn.name == "main" {
-                "__L1_main"
+                "__L1_main".to_string()
             } else {
-                &l1fn.name
+                l1fn.name.replace(".", "_")
             },
             self.l1args_to_c_function_args(&l1fn.args),
             self.l1block_to_c(&l1fn.body),

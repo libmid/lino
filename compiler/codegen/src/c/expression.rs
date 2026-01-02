@@ -24,7 +24,7 @@ impl CBackend {
                 format!(
                     "{}{}({})",
                     self.prefix,
-                    name,
+                    name.replace(".", "_"),
                     args.iter()
                         .map(|expr| { self.l1expr_to_c(&expr.expr) })
                         .collect::<Vec<String>>()

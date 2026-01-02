@@ -88,7 +88,6 @@ impl Compiler {
     }
 
     pub fn compile(&mut self) {
-        // Step 3: Parse imports
         // Step 3.5: Verify the order of default args
         // Step 5: Reorder bin ops
         // Step 8: Type Checking
@@ -115,6 +114,11 @@ impl Compiler {
         let mut l1p = parser::L1Parser::new(&tokens_without_whitespace);
         // TODO: Better error reporting
         l1p.parse().unwrap();
+        
+        // Step 3: Parse imports
+        use parser::imports::{process_imports, resolve_imports};
+        process_imports(l1p.get_ast(), self.input_file.clone()).unwrap();
+        resolve_imports(l1p.get_ast());
 
         // Step 4: Backpatch types
         backpatch(l1p.get_ast()).unwrap();

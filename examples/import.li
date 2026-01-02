@@ -1,0 +1,7 @@
+import abclib;
+
+def printf(str buf, i32 val);
+
+def main() {
+    printf("Sum = %d\n", abclib.sum(34, 35));
+}
