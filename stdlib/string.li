@@ -1,0 +1,27 @@
+import std.libc;
+
+def String {
+    *void ptr,
+    u64 len,
+    u64 capacity,
+}
+
+def @Method.String {
+    def INITIAL_CAPACITY = 16;
+
+    def new() Self {
+        def ptr = libc.malloc(Self.INITIAL_CAPACITY);
+        return Self { ptr, 0, INITIAL_CAPACITY };
+    }
+
+    def new(str buf) Self {
+        def len = libc.strlen(buf);
+        def ptr = libc.malloc(len);
+        libc.memcpy(ptr, buf, len); 
+        return Self { ptr, 0, len };
+    }
+
+    def @drop(self) {
+        libc.free(self.ptr);
+    }
+}

@@ -311,6 +311,18 @@ impl QbeBackend {
                     let instr = self.gen_expr(l1_expression);
                     self.func.add_instr(instr);
                 }
+                L1Statement::Block(l1_block) => todo!(),
+                L1Statement::Declaration { var, value } => todo!(),
+                L1Statement::FnDef(l1_fn) => todo!(),
+                L1Statement::ExternFnDeclr(l1_fn_declr) => todo!(),
+                L1Statement::StructDef(l1_struct) => todo!(),
+                L1Statement::MethodDef { on, defs } => todo!(),
+                L1Statement::EnumDef(l1_enum) => todo!(),
+                L1Statement::Assign { lhs, rhs } => todo!(),
+                L1Statement::While(l1_while) => todo!(),
+                L1Statement::If(l1_if) => todo!(),
+                L1Statement::Return(l1_expression) => todo!(),
+                L1Statement::Expr(l1_expression) => todo!(),
             }
         }
     }
@@ -587,6 +599,8 @@ impl QbeBackend {
             L1Type::Void => return None,
             L1Type::Backpatch(_) => unreachable!(),
             L1Type::Unknown => unreachable!(),
+            L1Type::SSelf => unreachable!(),
+            L1Type::Ty(l1_type) => todo!(),
         })
     }
 
@@ -635,8 +649,10 @@ impl QbeBackend {
             L1Type::Fn { name, args, ret } => todo!(),
             L1Type::Interface { symbols } => todo!(),
             L1Type::Void => todo!(),
+            L1Type::SSelf => unreachable!(),
             L1Type::Backpatch(_) => unreachable!(),
             L1Type::Unknown => unreachable!(),
+            L1Type::Ty(l1_type) => todo!(),
         }
     }
 
@@ -661,6 +677,8 @@ impl QbeBackend {
             L1Type::Void => todo!(),
             L1Type::Backpatch(_) => unreachable!(),
             L1Type::Unknown => unreachable!(),
+            L1Type::SSelf => unreachable!(),
+            L1Type::Ty(l1_type) => todo!(),
         }
     }
 

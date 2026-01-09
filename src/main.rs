@@ -79,7 +79,7 @@ fn main() {
                 Backend::C => Target::C,
             });
 
-            compiler::Compiler::new(file, Target::Qbe, options).compile();
+            compiler::Compiler::new(file, options).compile();
         }
         Commands::Build {
             file,
@@ -119,8 +119,9 @@ fn build(
         Backend::Qbe => Target::Qbe,
         Backend::C => Target::C,
     });
+    options.stdlib("stdlib".into());
 
-    compiler::Compiler::new(file, Target::Qbe, options).compile();
+    compiler::Compiler::new(file, options).compile();
 
     let mut status;
     match backend {
@@ -144,7 +145,7 @@ fn build(
         }
         Backend::C => {
             status = Command::new("gcc")
-            .arg("-Wno-builtin-declaration-mismatch")
+                .arg("-Wno-builtin-declaration-mismatch")
                 .arg(ir_file)
                 .arg("runtime/main.c")
                 .arg("-lc")

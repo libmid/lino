@@ -4,7 +4,7 @@ pub mod error;
 pub mod imports;
 mod l1rules;
 
-use ast::{L1Ast, L1Statement};
+use ast::{L1Ast, L1Statement, L1Type};
 
 use error::Result;
 
@@ -48,7 +48,7 @@ impl<'a> L1Parser<'a> {
         let tok = self.peek()?;
         match tok.kind {
             TokenKind::Keyword(Keyword::Def) => {
-                let statement = self.parse_def()?;
+                let statement = self.parse_def(None)?;
 
                 match statement {
                     L1Statement::FnDef(func) => self
@@ -67,6 +67,22 @@ impl<'a> L1Parser<'a> {
                         .ast
                         .symbols
                         .insert(e.name.clone(), ast::Symbol::Enum(e)),
+                    L1Statement::MethodDef { on, defs } => {
+                        for def in defs {
+                            match def {
+                                L1Statement::Declaration { var, value } => todo!(),
+                                L1Statement::FnDef(mut l1_fn) => {
+                                    l1_fn.name = format!("{}.{}", on.to_string(), l1_fn.name);
+                                    self.ast
+                                        .symbols
+                                        .insert(l1_fn.name.clone(), ast::Symbol::Fn(l1_fn));
+                                }
+                                _ => unimplemented!(),
+                            }
+                        }
+
+                        None
+                    }
                     _ => unreachable!(),
                 };
             }

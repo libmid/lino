@@ -1,11 +1,9 @@
 import std.libc;
-import std.ffi;
 
-def print_str(str s) i32 {
-    def s = ffi.str_2_cstr(s);
-    return libc.puts(s);
+def print(str buf) i32 {
+    return libc.write(1, buf, libc.strlen(buf));
 }
 
-def println_str(str s) i32 {
-    print_str(s + "\n");
-}
+# def println(str buf) i32 {
+#     return print(buf) + libc.write(1, "\n", 1);
+# }

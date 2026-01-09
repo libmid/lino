@@ -98,7 +98,7 @@ impl<'a> L1Parser<'a> {
 
     /// Parses the "def" keyword
     /// It can parse (extern) functions, structs and (static) variables.
-    pub fn parse_def(&mut self) -> Result<L1Statement> {
+    pub fn parse_def(&mut self, on: Option<L1Type>) -> Result<L1Statement> {
         self.match_keyword(Keyword::Def)?;
 
         let tok = self.peek()?;
@@ -118,6 +118,30 @@ impl<'a> L1Parser<'a> {
 
                 self.match_token(BraceClose)?;
             }
+            At => {
+                // Special function, handle differently
+                self.match_token(At)?;
+                match self.match_iden()?.as_str() {
+                    "Fn" => {
+                        self.match_token(ColonColon)?;
+                        let ty = self.parse_type()?;
+
+                        self.match_token(CurlyBracesOpen)?;
+
+                        let mut defs = Vec::new();
+                        while self.peek()?.kind != CurlyBracesClose {
+                            let statement = self.parse_def(Some(ty.clone()))?;
+                            defs.push(statement);
+                        }
+                        self.match_token(CurlyBracesClose)?;
+
+                        return Ok(L1Statement::MethodDef { on: ty, defs });
+                    }
+                    i => {
+                        panic!("{i} is not a special case")
+                    }
+                }
+            }
             // No generics, type name
             Identifier(_) => {}
             // TODO: Provide generics hint
@@ -136,8 +160,21 @@ impl<'a> L1Parser<'a> {
             // Is a function
             BraceOpen => {
                 self.match_token(BraceOpen)?;
-                let args = self.parse_args(BraceClose)?;
+                let mut args = self.parse_args(BraceClose)?;
                 self.match_token(BraceClose)?;
+
+                // Check for self
+                if let None = on
+                    && args.iter().any(|f| f.ty == L1Type::SSelf)
+                {
+                    return Err(ParserError::SelfInStructlessFunction);
+                } else if let Some(on) = on {
+                    args.iter_mut().for_each(|f| {
+                        if f.ty == L1Type::SSelf {
+                            f.ty = on.clone();
+                        }
+                    });
+                }
 
                 // TODO: parse the return type
                 let mut ret = L1Type::Void;
@@ -309,7 +346,11 @@ impl<'a> L1Parser<'a> {
     fn parse_type(&mut self) -> Result<L1Type> {
         let ty = match self.peek()?.kind {
             Identifier(_) => {
-                let iden = self.match_iden()?;
+                let iden: String = self.match_iden()?;
+                if &iden == "self" {
+                    return Ok(L1Type::SSelf);
+                }
+
                 match self.peek()?.kind {
                     ColonColon => {
                         self.match_token(ColonColon)?;
@@ -435,6 +476,14 @@ impl<'a> L1Parser<'a> {
     fn parse_arg(&mut self) -> Result<L1Arg> {
         let mut ty = self.parse_type()?;
 
+        if ty == L1Type::SSelf {
+            return Ok(L1Arg {
+                name: "self".to_string(),
+                ty,
+                default: None,
+            });
+        }
+
         match self.peek()?.kind {
             Variadic => {
                 self.match_token(Variadic)?;
@@ -505,7 +554,7 @@ impl<'a> L1Parser<'a> {
             CurlyBracesOpen => L1Statement::Block(self.parse_block(scope.clone())?),
             Keyword(key) => match key {
                 Keyword::Def => {
-                    let statement = self.parse_def()?;
+                    let statement = self.parse_def(None)?;
 
                     statement
                 }

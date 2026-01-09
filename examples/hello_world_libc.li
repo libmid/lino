@@ -1,5 +1,5 @@
-def printf(str buf);
+import std.io;
 
 def main() i32 {
-    printf("Hello World!\n");
+    io.print("Hello World!\n");
 }

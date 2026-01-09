@@ -64,6 +64,9 @@ impl CBackend {
                 }
             }
             L1Statement::Expr(l1_expression) => format!("{};", self.l1expr_to_c(l1_expression)),
+            L1Statement::MethodDef { on, defs } => {
+                todo!()
+            }
         }
     }
 }

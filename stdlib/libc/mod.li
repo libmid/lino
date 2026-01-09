@@ -1,0 +1,5 @@
+def write(i32 fd,*char buf, i32 count) i32;
+def strlen(*char buf) i32;
+
+def malloc(u64 size) *void;
+def free(*void ptr);

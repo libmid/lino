@@ -36,6 +36,8 @@ pub enum TokenKind {
     Percent,
     /// "."
     Dot,
+    /// "@",
+    At,
     /// ".."
     Range,
     /// "..="
@@ -201,6 +203,10 @@ impl<'a> Lexer<'a> {
                 '-' => {
                     self.pos += 1;
                     Some(Minus)
+                }
+                '@' => {
+                    self.pos += 1;
+                    Some(At)
                 }
                 '=' => match second_char {
                     Some('=') => {

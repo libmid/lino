@@ -42,15 +42,7 @@ impl Inference {
                         l1_fn_declr.name.clone(),
                         L1Type::Fn {
                             name: l1_fn_declr.name.clone(),
-                            args: l1_fn_declr
-                                .args
-                                .clone()
-                                .into_iter()
-                                .map(|x| L1ArgField {
-                                    name: x.name,
-                                    ty: x.ty,
-                                })
-                                .collect(),
+                            args: l1_fn_declr.args.clone().into_iter().map(|x| x.ty).collect(),
                             ret: l1_fn_declr.ret.clone().into(),
                         },
                     );
@@ -60,15 +52,7 @@ impl Inference {
                         l1_fn.name.clone(),
                         L1Type::Fn {
                             name: l1_fn.name.clone(),
-                            args: l1_fn
-                                .args
-                                .clone()
-                                .into_iter()
-                                .map(|x| L1ArgField {
-                                    name: x.name,
-                                    ty: x.ty,
-                                })
-                                .collect(),
+                            args: l1_fn.args.clone().into_iter().map(|x| x.ty).collect(),
                             ret: l1_fn.ret.clone().into(),
                         },
                     );
@@ -82,11 +66,23 @@ impl Inference {
     }
 
     pub fn infer_types(&self, ast: &mut L1Ast) -> Result<(), InferenceError> {
+        let mut symbols = IndexMap::new();
+        for (name, symbol) in &ast.symbols {
+            symbols.insert(
+                name.clone(),
+                match symbol {
+                    ast::Symbol::Struct(_) => L1Type::Ty(Box::new(symbol.into())),
+                    ast::Symbol::Enum(_) => L1Type::Ty(Box::new(symbol.into())),
+                    ast::Symbol::FnDeclr(_) => symbol.into(),
+                    ast::Symbol::Fn(_) => symbol.into(),
+                },
+            );
+        }
         for (_, symbol) in &mut ast.symbols {
             match symbol {
                 ast::Symbol::Struct(_) | ast::Symbol::Enum(_) | ast::Symbol::FnDeclr(_) => {}
                 ast::Symbol::Fn(l1_fn) => {
-                    let mut stack = IndexMap::new();
+                    let mut stack = IndexMap::from(symbols.clone());
                     for arg in &l1_fn.args {
                         stack.insert(arg.name.clone(), arg.ty.clone());
                     }
@@ -156,6 +152,7 @@ impl Inference {
                 ast::L1Statement::Expr(l1_expression) => {
                     self.infer_expr_ty(l1_expression, stack)?
                 }
+                ast::L1Statement::MethodDef { on: _, defs: _ } => unreachable!(),
             }
         }
         stack.truncate(stack.len() - scoped_pushes);
@@ -164,10 +161,10 @@ impl Inference {
 
     fn infer_expr_ty(
         &self,
-        expr: &mut L1Expression,
+        expr0: &mut L1Expression,
         stack: &IndexMap<String, L1Type>,
     ) -> Result<(), InferenceError> {
-        let ty = match &mut expr.expr {
+        let ty = match &mut expr0.expr {
             ast::L1ExpressionInner::Int(_) => L1Type::I64,
             ast::L1ExpressionInner::Float(_) => L1Type::F64,
             ast::L1ExpressionInner::Str(_) => L1Type::Str,
@@ -209,6 +206,7 @@ impl Inference {
                 if let Some(ty) = stack.get(var) {
                     ty.clone()
                 } else {
+                    eprintln!("Var: {var}");
                     return Err(InferenceError::UndeclaredVariable);
                 }
             }
@@ -218,6 +216,7 @@ impl Inference {
                 if let Some(ty) = stack.get(name) {
                     ty.clone()
                 } else {
+                    eprintln!("Var: {name}");
                     return Err(InferenceError::UndeclaredVariable);
                 }
             }
@@ -243,13 +242,17 @@ impl Inference {
                 }
             }
             ast::L1ExpressionInner::Field(_) => todo!(),
-            ast::L1ExpressionInner::FieldAccess { expr, field } => {
-                if expr.ty == L1Type::Unknown {
-                    self.infer_expr_ty(expr, stack)?;
+            ast::L1ExpressionInner::FieldAccess { expr: expr1, field } => {
+                if expr1.ty == L1Type::Unknown {
+                    self.infer_expr_ty(expr1, stack)?;
                 }
 
-                match expr.ty.clone() {
-                    L1Type::Struct(ref s) | L1Type::Ptr(box L1Type::Struct(ref s)) => {
+                match expr1.ty.clone() {
+                    L1Type::Ty(
+                        box L1Type::Struct(ref s) | box L1Type::Ptr(box L1Type::Struct(ref s)),
+                    )
+                    | L1Type::Struct(ref s)
+                    | L1Type::Ptr(box L1Type::Struct(ref s)) => {
                         let st = self.st_lookup.get(s).unwrap();
 
                         match &mut field.expr {
@@ -280,7 +283,19 @@ impl Inference {
                                 }
                                 _ => todo!(),
                             },
-                            _ => todo!(),
+                            L1ExpressionInner::FnCall { name, args: _ } => {
+                                if let Some(L1Type::Fn { name, args, ret }) =
+                                    self.ty_table.get(&format!("{s}.{name}"))
+                                {
+                                    field.ty = *ret.clone();
+                                    expr0.ty = *ret.clone();
+                                } else {
+                                    unreachable!();
+                                }
+                            }
+                            _ => {
+                                self.infer_expr_ty(expr1, stack)?;
+                            }
                         }
                     }
                     t => todo!("{:?}", t),
@@ -304,7 +319,7 @@ impl Inference {
             ast::L1ExpressionInner::Null => L1Type::Ptr(L1Type::Void.into()),
         };
 
-        expr.ty = ty;
+        expr0.ty = ty;
 
         Ok(())
     }

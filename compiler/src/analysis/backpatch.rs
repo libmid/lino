@@ -1,4 +1,3 @@
-
 use ast::{L1Ast, L1Block, L1Fn, L1FnDeclr, L1Statement, L1Struct, L1Type, SymbolTable};
 
 const RECURSION_LIMIT: u32 = 300;
@@ -242,7 +241,7 @@ fn needs_backpatch(ty: &L1Type) -> bool {
         L1Type::Ptr(ty) => needs_backpatch(ty),
         L1Type::Fn { name: _, args, ret } => {
             for arg in args {
-                if needs_backpatch(&arg.ty) {
+                if needs_backpatch(&arg) {
                     return true;
                 }
             }

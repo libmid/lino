@@ -1,4 +1,4 @@
-use std::{collections::HashMap};
+use std::collections::HashMap;
 
 pub type SymbolTable = HashMap<String, Symbol>;
 
@@ -25,8 +25,16 @@ impl From<&Symbol> for L1Type {
         match value {
             Symbol::Struct(l1_struct) => L1Type::Struct(l1_struct.name.clone()),
             Symbol::Enum(_l1_enum) => todo!("L1Enum to L1type"),
-            Symbol::FnDeclr(_l1_fn_declr) => todo!(),
-            Symbol::Fn(_l1_fn) => todo!(),
+            Symbol::FnDeclr(l1_fn_declr) => L1Type::Fn {
+                name: l1_fn_declr.name.clone(),
+                args: l1_fn_declr.args.iter().map(|f| f.ty.clone()).collect(),
+                ret: Box::new(l1_fn_declr.ret.clone()),
+            },
+            Symbol::Fn(l1_fn) => L1Type::Fn {
+                name: l1_fn.name.clone(),
+                args: l1_fn.args.iter().map(|f| f.ty.clone()).collect(),
+                ret: Box::new(l1_fn.ret.clone()),
+            },
         }
     }
 }
@@ -38,26 +46,12 @@ impl From<Symbol> for L1Type {
             Symbol::Enum(_l1_enum) => todo!("L1Enum to L1type"),
             Symbol::FnDeclr(l1_fn_declr) => L1Type::Fn {
                 name: l1_fn_declr.name,
-                args: l1_fn_declr
-                    .args
-                    .iter()
-                    .map(|f| L1ArgField {
-                        name: f.name.clone(),
-                        ty: f.ty.clone(),
-                    })
-                    .collect(),
+                args: l1_fn_declr.args.iter().map(|f| f.ty.clone()).collect(),
                 ret: l1_fn_declr.ret.into(),
             },
             Symbol::Fn(l1_fn) => L1Type::Fn {
                 name: l1_fn.name.clone(),
-                args: l1_fn
-                    .args
-                    .iter()
-                    .map(|f| L1ArgField {
-                        name: f.name.clone(),
-                        ty: f.ty.clone(),
-                    })
-                    .collect(),
+                args: l1_fn.args.iter().map(|f| f.ty.clone()).collect(),
                 ret: l1_fn.ret.clone().into(),
             },
         }
@@ -106,9 +100,10 @@ pub enum L1Type {
     // Not a real type
     // Parser reduces this to Arr(Type) in later stages
     Variadic(Box<L1Type>),
+    Ty(Box<L1Type>),
     Fn {
         name: String,
-        args: Vec<L1ArgField>,
+        args: Vec<L1Type>,
         ret: Box<L1Type>,
     },
     Ptr(Box<L1Type>),
@@ -116,6 +111,7 @@ pub enum L1Type {
         symbols: HashMap<String, L1Type>,
     },
     Void,
+    SSelf,
     // Not a real type
     // The parser backpathes this from symbols table
     Backpatch(String),
@@ -167,6 +163,46 @@ impl<'a> From<&'a str> for L1Type {
     }
 }
 
+impl ToString for L1Type {
+    fn to_string(&self) -> String {
+        match self {
+            U8 => "u8".into(),
+            U16 => "u16".into(),
+            U32 => "u32".into(),
+            U64 => "u64".into(),
+            I8 => "i8".into(),
+            I16 => "i16".into(),
+            I32 => "i32".into(),
+            I64 => "i64".into(),
+            F32 => "f32".into(),
+            F64 => "f64".into(),
+            Bool => "bool".into(),
+            Str => "str".into(),
+            Char => "char".into(),
+            Struct(s) => s.into(),
+            Enum(e) => e.into(),
+            Arr(l1_type) => format!("L1ARRAY_{}", l1_type.to_string()),
+            Variadic(l1_type) => format!("L1VARIADIC_{}", l1_type.to_string()),
+            Fn { name, args, ret: _ } => {
+                format!(
+                    "L1FN_{name}_{}",
+                    args.iter()
+                        .map(|arg| arg.to_string())
+                        .collect::<Vec<String>>()
+                        .join("_")
+                )
+            }
+            Ptr(l1_type) => format!("L1PTR_{}", l1_type.to_string()),
+            Interface { symbols } => todo!(),
+            Void => "void".into(),
+            SSelf => "self".into(),
+            Backpatch(b) => b.into(),
+            Unknown => unreachable!(),
+            Ty(_) => todo!(),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct L1StructField {
     pub name: String,
@@ -194,6 +230,17 @@ pub struct L1FnDeclr {
     pub generics: Vec<L1Generic>,
     pub args: Vec<L1Arg>,
     pub ret: L1Type,
+}
+
+impl From<L1Fn> for L1FnDeclr {
+    fn from(value: L1Fn) -> Self {
+        Self {
+            name: value.name,
+            generics: value.generics,
+            args: value.args,
+            ret: value.ret,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -259,6 +306,10 @@ pub enum L1Statement {
     FnDef(L1Fn),
     ExternFnDeclr(L1FnDeclr),
     StructDef(L1Struct),
+    MethodDef {
+        on: L1Type,
+        defs: Vec<L1Statement>,
+    },
     EnumDef(L1Enum),
     Assign {
         lhs: L1Expression,

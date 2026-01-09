@@ -42,9 +42,9 @@ impl CBackend {
 
                 format!("{} {} {}", lhs, op.to_string(), rhs)
             }
-            ast::L1ExpressionInner::StructInit { name: _, fields } => {
+            ast::L1ExpressionInner::StructInit { name, fields } => {
                 format!(
-                    "{{
+                    "(struct {name}){{
                     {}
                 }}",
                     self.l1named_expr_to_c_struct_fields(fields)

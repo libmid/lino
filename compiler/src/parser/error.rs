@@ -24,6 +24,7 @@ pub enum ParserError {
     InvalidExpr,
     InvalidBinOp,
     InvalidStructInit,
+    SelfInStructlessFunction,
     
     /// No  more tokens
     EOF,

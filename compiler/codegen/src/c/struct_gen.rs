@@ -10,7 +10,7 @@ struct {}{} {{
 {}
 }};",
             self.prefix,
-            st.name,
+            st.name.replace(".", "_"),
             self.l1args_to_c_struct_fields(&st.fields)
         )
     }

@@ -14,7 +14,9 @@ use codespan_reporting::term::termcolor::{ColorChoice, StandardStream};
 
 use crate::analysis::backpatch::backpatch;
 use crate::analysis::inference::Inference;
+use crate::analysis::method;
 pub use crate::lexer::{Token, TokenKind};
+use crate::parser::imports::{process_imports, resolve_imports};
 
 mod analysis;
 mod lexer;
@@ -74,7 +76,7 @@ pub struct Compiler {
 }
 
 impl Compiler {
-    pub fn new(input_file: PathBuf, target: Target, options: CompilerOptions) -> Self {
+    pub fn new(input_file: PathBuf, options: CompilerOptions) -> Self {
         let input = std::fs::read_to_string(&input_file).unwrap_or_else(|err| {
             eprintln!("ERROR: {}", err);
             std::process::exit(1);
@@ -114,19 +116,34 @@ impl Compiler {
         let mut l1p = parser::L1Parser::new(&tokens_without_whitespace);
         // TODO: Better error reporting
         l1p.parse().unwrap();
-        
+
+        // dbg!(l1p.get_ast());
+
         // Step 3: Parse imports
-        use parser::imports::{process_imports, resolve_imports};
-        process_imports(l1p.get_ast(), self.input_file.clone()).unwrap();
+        process_imports(
+            l1p.get_ast(),
+            self.input_file.clone(),
+            self.options.stdlib.clone(),
+        )
+        .unwrap();
         resolve_imports(l1p.get_ast());
+
+        // dbg!(l1p.get_ast());
 
         // Step 4: Backpatch types
         backpatch(l1p.get_ast()).unwrap();
+
+        // dbg!(l1p.get_ast());
 
         // Step 7: Infer expression type
         let inference = Inference::new(l1p.get_ast());
         inference.infer_types(l1p.get_ast()).unwrap();
 
+        // dbg!(l1p.get_ast());
+
+        // Step 7.5: Patch method calls
+        method::patch_method_calls(l1p.get_ast());
+        
         // dbg!(l1p.get_ast());
 
         // Step 9: Codegen

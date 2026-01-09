@@ -27,8 +27,10 @@ impl CBackend {
             L1Type::Ptr(l1_type) => &format!("{}*", Self::l1type_to_c_type(l1_type)),
             L1Type::Interface { symbols } => todo!(),
             L1Type::Void => "void",
+            L1Type::SSelf => unreachable!(),
             L1Type::Backpatch(_) => unreachable!(),
             L1Type::Unknown => unreachable!(),
+            L1Type::Ty(l1_type) => todo!(),
         };
 
         suffix + ty_name

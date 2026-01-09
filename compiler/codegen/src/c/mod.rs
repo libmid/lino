@@ -34,6 +34,16 @@ impl crate::Backend for CBackend {
         for (_, symbol) in &ast.symbols {
             match symbol {
                 ast::Symbol::Fn(l1_fn) => {
+                    self.module
+                        .push(self.l1fn_declr_to_c(&l1_fn.clone().into()));
+                }
+                _ => {}
+            }
+        }
+
+        for (_, symbol) in &ast.symbols {
+            match symbol {
+                ast::Symbol::Fn(l1_fn) => {
                     if l1_fn.name == "main" {
                         main_fn = Some(l1_fn);
                     } else {
