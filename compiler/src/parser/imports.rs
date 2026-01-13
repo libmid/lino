@@ -2,7 +2,7 @@ use crate::lexer::{Lexer, TokenKind};
 use crate::parser::L1Parser;
 use crate::parser::error::Result;
 use ast::{
-    L1Ast, L1Expression, L1ExpressionInner, L1Import, L1ImportFragment, L1Statement, L1Type, Symbol,
+    L1Ast, L1Expression, L1ExpressionInner, L1Import, L1ImportFragment, L1Statement, Symbol,
 };
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;

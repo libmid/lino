@@ -1,4 +1,4 @@
-def printf();
+def printf(str buf, i32 n1, i32 n2);
 
 def fibo(i32 n) i32 {
     if n <= 1 {

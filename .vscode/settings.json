@@ -1,3 +1,6 @@
 {
-    "python.languageServer": "None"
+    "python.languageServer": "None",
+    "files.associations": {
+        "*.li": "python",
+    }
 }
