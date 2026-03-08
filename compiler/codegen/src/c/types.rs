@@ -23,7 +23,12 @@ impl CBackend {
             L1Type::Enum(e) => &format!("enum {e}"),
             L1Type::Arr(l1_type) => &format!("{}*", Self::l1type_to_c_type(l1_type)),
             L1Type::Variadic(l1_type) => todo!(),
-            L1Type::Fn { name, args, ret } => todo!(),
+            L1Type::Fn {
+                name,
+                args,
+                ret,
+                extrn,
+            } => todo!(),
             L1Type::Ptr(l1_type) => &format!("{}*", Self::l1type_to_c_type(l1_type)),
             L1Type::Interface { symbols } => todo!(),
             L1Type::Void => "void",
@@ -31,6 +36,7 @@ impl CBackend {
             L1Type::Backpatch(_) => unreachable!(),
             L1Type::Unknown => unreachable!(),
             L1Type::Ty(l1_type) => todo!(),
+            L1Type::Module(_) => unreachable!(),
         };
 
         suffix + ty_name

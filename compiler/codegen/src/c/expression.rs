@@ -1,5 +1,5 @@
 use crate::c::CBackend;
-use ast::{L1Expression, L1NamedExpr, L1Type};
+use ast::{L1Expression, L1ExpressionInner, L1NamedExpr, L1Type};
 
 impl CBackend {
     pub fn l1expr_to_c(&self, expr: &L1Expression) -> String {
@@ -20,21 +20,30 @@ impl CBackend {
                         .join("\n")
                 )
             }
-            ast::L1ExpressionInner::FnCall { name, args } => {
+            ast::L1ExpressionInner::FnCall {
+                name,
+                args,
+                extrn: _,
+            } => {
                 format!(
-                    "{}{}({})",
-                    self.prefix,
-                    name.replace(".", "_"),
+                    "{}({})",
+                    name,
                     args.iter()
                         .map(|expr| { self.l1expr_to_c(&expr.expr) })
                         .collect::<Vec<String>>()
                         .join(",")
                 )
             }
-            ast::L1ExpressionInner::Variable(v) => format!("{}{}", self.prefix, v),
-            ast::L1ExpressionInner::Field(f) => format!("{}{}", self.prefix, f),
+            ast::L1ExpressionInner::Variable(v) => {
+                if let L1Type::Module(m) = &expr.ty {
+                    format!("{}", m)
+                } else {
+                    format!("{}{}", self.prefix, v)
+                }
+            }
+            ast::L1ExpressionInner::Field(f) => format!("{}", f),
             ast::L1ExpressionInner::ArrayAccess { name, index } => {
-                format!("{}{}[{}]", self.prefix, name, self.l1expr_to_c(index))
+                format!("{}[{}]", name, self.l1expr_to_c(index))
             }
             ast::L1ExpressionInner::BinOp { lhs, op, rhs } => {
                 let lhs = self.l1expr_to_c(lhs);
@@ -51,7 +60,17 @@ impl CBackend {
                 )
             }
             ast::L1ExpressionInner::FieldAccess { expr, field } => {
-                if let L1Type::Ptr(_) = expr.ty {
+                if let L1Type::Module(_) = &expr.ty {
+                    if let L1ExpressionInner::FnCall { name, args, extrn } = &field.expr {
+                        if *extrn {
+                            format!("{}", self.l1expr_to_c(field))
+                        } else {
+                            format!("{}_{}", self.l1expr_to_c(expr), self.l1expr_to_c(field))
+                        }
+                    } else {
+                        format!("{}_{}", self.l1expr_to_c(expr), self.l1expr_to_c(field))
+                    }
+                } else if let L1Type::Ptr(_) = expr.ty {
                     format!("(*{}).{}", self.l1expr_to_c(expr), self.l1expr_to_c(field))
                 } else {
                     format!("{}.{}", self.l1expr_to_c(expr), self.l1expr_to_c(field))

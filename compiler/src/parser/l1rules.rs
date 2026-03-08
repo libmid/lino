@@ -842,6 +842,7 @@ impl<'a> L1Parser<'a> {
                     expr: L1ExpressionInner::FnCall {
                         name: func,
                         args: vec![],
+                        extrn: false,
                     },
                 })
             }
@@ -864,7 +865,11 @@ impl<'a> L1Parser<'a> {
 
                 Ok(L1Expression {
                     ty: L1Type::Unknown,
-                    expr: L1ExpressionInner::FnCall { name: func, args },
+                    expr: L1ExpressionInner::FnCall {
+                        name: func,
+                        args,
+                        extrn: false,
+                    },
                 })
             }
         }

@@ -1,3 +1,5 @@
-def Color {
-    u8 r, u8 g, u8 b
+import std.io;
+
+def main() {
+    io.print("Hello, World!\n");
 }

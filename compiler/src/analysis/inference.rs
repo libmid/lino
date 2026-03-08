@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use ast::{L1ArgField, L1Ast, L1Block, L1Expression, L1ExpressionInner, L1Struct, L1Type};
+use ast::{L1Ast, L1Block, L1Expression, L1ExpressionInner, L1Module, L1Struct, L1Type};
 use indexmap::IndexMap;
 
 #[derive(Debug)]
@@ -18,15 +18,25 @@ pub enum InferenceError {
 
 pub struct Inference {
     ty_table: HashMap<String, L1Type>,
+    module_lookup: HashMap<String, L1Module>,
     st_lookup: HashMap<String, L1Struct>,
 }
 
 impl Inference {
     pub fn new(ast: &mut L1Ast) -> Self {
+        // dbg!(&ast);
         let mut map = HashMap::new();
         let mut st_lookup = HashMap::new();
+        let mut module_lookup = HashMap::new();
         for (_, symbol) in &ast.symbols {
             match symbol {
+                ast::Symbol::Module(l1_module) => {
+                    map.insert(
+                        l1_module.name.clone(),
+                        L1Type::Module(l1_module.name.clone()),
+                    );
+                    module_lookup.insert(l1_module.name.clone(), l1_module.clone());
+                }
                 ast::Symbol::Struct(l1_struct) => {
                     map.insert(
                         l1_struct.name.clone(),
@@ -44,6 +54,7 @@ impl Inference {
                             name: l1_fn_declr.name.clone(),
                             args: l1_fn_declr.args.clone().into_iter().map(|x| x.ty).collect(),
                             ret: l1_fn_declr.ret.clone().into(),
+                            extrn: true,
                         },
                     );
                 }
@@ -54,6 +65,7 @@ impl Inference {
                             name: l1_fn.name.clone(),
                             args: l1_fn.args.clone().into_iter().map(|x| x.ty).collect(),
                             ret: l1_fn.ret.clone().into(),
+                            extrn: false,
                         },
                     );
                 }
@@ -62,6 +74,7 @@ impl Inference {
         Self {
             ty_table: map,
             st_lookup,
+            module_lookup,
         }
     }
 
@@ -71,6 +84,7 @@ impl Inference {
             symbols.insert(
                 name.clone(),
                 match symbol {
+                    ast::Symbol::Module(_) => symbol.into(),
                     ast::Symbol::Struct(_) => L1Type::Ty(Box::new(symbol.into())),
                     ast::Symbol::Enum(_) => L1Type::Ty(Box::new(symbol.into())),
                     ast::Symbol::FnDeclr(_) => symbol.into(),
@@ -80,7 +94,10 @@ impl Inference {
         }
         for (_, symbol) in &mut ast.symbols {
             match symbol {
-                ast::Symbol::Struct(_) | ast::Symbol::Enum(_) | ast::Symbol::FnDeclr(_) => {}
+                ast::Symbol::Module(_)
+                | ast::Symbol::Struct(_)
+                | ast::Symbol::Enum(_)
+                | ast::Symbol::FnDeclr(_) => {}
                 ast::Symbol::Fn(l1_fn) => {
                     let mut stack = IndexMap::from(symbols.clone());
                     for arg in &l1_fn.args {
@@ -186,7 +203,11 @@ impl Inference {
 
                 first.unwrap().ty.clone()
             }
-            ast::L1ExpressionInner::FnCall { name, args } => {
+            ast::L1ExpressionInner::FnCall {
+                name,
+                args,
+                extrn: set_extern,
+            } => {
                 for arg in args {
                     self.infer_expr_ty(&mut arg.expr, stack)?;
                 }
@@ -195,8 +216,10 @@ impl Inference {
                     name: _,
                     args: _,
                     ret,
+                    extrn,
                 }) = self.ty_table.get(name)
                 {
+                    *set_extern = *extrn;
                     *ret.clone()
                 } else {
                     return Err(InferenceError::NoSymbol);
@@ -207,6 +230,7 @@ impl Inference {
                     ty.clone()
                 } else {
                     eprintln!("Var: {var}");
+                    dbg!(expr0, stack);
                     return Err(InferenceError::UndeclaredVariable);
                 }
             }
@@ -283,14 +307,27 @@ impl Inference {
                                 }
                                 _ => todo!(),
                             },
-                            L1ExpressionInner::FnCall { name, args: _ } => {
-                                if let Some(L1Type::Fn { name, args, ret }) =
-                                    self.ty_table.get(&format!("{s}.{name}"))
+                            L1ExpressionInner::FnCall {
+                                name,
+                                args,
+                                extrn: set_extrn,
+                            } => {
+                                if let Some(L1Type::Fn {
+                                    name,
+                                    args,
+                                    ret,
+                                    extrn,
+                                }) = self.ty_table.get(&format!("{s}.{name}"))
                                 {
+                                    *set_extrn = *extrn;
                                     field.ty = *ret.clone();
                                     expr0.ty = *ret.clone();
                                 } else {
                                     unreachable!();
+                                }
+
+                                for arg in args {
+                                    self.infer_expr_ty(&mut arg.expr, stack)?;
                                 }
                             }
                             _ => {
@@ -298,7 +335,68 @@ impl Inference {
                             }
                         }
                     }
-                    t => todo!("{:?}", t),
+                    L1Type::Module(ref m) => {
+                        let module = self.module_lookup.get(m).unwrap();
+
+                        match &mut field.expr {
+                            L1ExpressionInner::Field(v) => {
+                                for (name, symbol) in &module.symbols {
+                                    if name == v {
+                                        field.ty = symbol.into();
+                                        break;
+                                    }
+                                }
+                                if field.ty == L1Type::Unknown {
+                                    return Err(InferenceError::InvalidFieldAccess);
+                                }
+                            }
+                            L1ExpressionInner::FieldAccess { expr, field: _ } => match expr.expr {
+                                L1ExpressionInner::Field(ref second_field) => {
+                                    for (name, symbol) in &module.symbols {
+                                        if name == second_field {
+                                            expr.ty = symbol.into();
+                                            break;
+                                        }
+                                    }
+                                    if expr.ty == L1Type::Unknown {
+                                        return Err(InferenceError::InvalidFieldAccess);
+                                    }
+
+                                    self.infer_expr_ty(field, stack)?;
+                                }
+                                _ => todo!(),
+                            },
+                            L1ExpressionInner::FnCall {
+                                name,
+                                args,
+                                extrn: set_extern,
+                            } => {
+                                if let Some(L1Type::Fn {
+                                    name: _,
+                                    args: _,
+                                    ret,
+                                    extrn,
+                                }) = module.symbols.get(name).map(|s| s.into())
+                                {
+                                    *set_extern = extrn;
+                                    field.ty = *ret.clone();
+                                    expr0.ty = *ret.clone();
+                                } else {
+                                    unreachable!();
+                                }
+
+                                for arg in args {
+                                    self.infer_expr_ty(&mut arg.expr, stack)?;
+                                }
+                            }
+                            _ => {
+                                self.infer_expr_ty(expr1, stack)?;
+                            }
+                        }
+                    }
+                    t => {
+                        todo!("{:?}", t)
+                    }
                 }
 
                 field.ty.clone()

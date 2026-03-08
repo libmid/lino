@@ -58,7 +58,11 @@ fn patch_method_calls_expr(expr: &mut L1Expression) {
                 patch_method_calls_expr(expr);
             }
         }
-        ast::L1ExpressionInner::FnCall { name: _, args } => {
+        ast::L1ExpressionInner::FnCall {
+            name: _,
+            args,
+            extrn,
+        } => {
             for arg in args {
                 patch_method_calls_expr(&mut arg.expr);
             }
@@ -82,11 +86,13 @@ fn patch_method_calls_expr(expr: &mut L1Expression) {
                     L1ExpressionInner::FnCall {
                         name: fn_name,
                         args,
+                        extrn,
                     },
                 ) => {
                     expr.expr = L1ExpressionInner::FnCall {
                         name: format!("{st_name}_{fn_name}"),
                         args,
+                        extrn,
                     }
                 }
                 (
@@ -94,6 +100,7 @@ fn patch_method_calls_expr(expr: &mut L1Expression) {
                     L1ExpressionInner::FnCall {
                         name: fn_name,
                         mut args,
+                        extrn,
                     },
                 ) => {
                     args.insert(
@@ -111,6 +118,7 @@ fn patch_method_calls_expr(expr: &mut L1Expression) {
                     expr.expr = L1ExpressionInner::FnCall {
                         name: format!("{st_name}_{fn_name}"),
                         args,
+                        extrn,
                     }
                 }
                 _ => {

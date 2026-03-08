@@ -4,7 +4,7 @@ pub type SymbolTable = HashMap<String, Symbol>;
 
 use L1Type::*;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct L1Ast {
     // The reason of using a map instead of set here is to
     // allow overloading.
@@ -18,6 +18,7 @@ pub enum Symbol {
     Enum(L1Enum),
     FnDeclr(L1FnDeclr),
     Fn(L1Fn),
+    Module(L1Module),
 }
 
 impl From<&Symbol> for L1Type {
@@ -29,12 +30,15 @@ impl From<&Symbol> for L1Type {
                 name: l1_fn_declr.name.clone(),
                 args: l1_fn_declr.args.iter().map(|f| f.ty.clone()).collect(),
                 ret: Box::new(l1_fn_declr.ret.clone()),
+                extrn: true,
             },
             Symbol::Fn(l1_fn) => L1Type::Fn {
                 name: l1_fn.name.clone(),
                 args: l1_fn.args.iter().map(|f| f.ty.clone()).collect(),
                 ret: Box::new(l1_fn.ret.clone()),
+                extrn: false,
             },
+            Symbol::Module(l1_module) => L1Type::Module(l1_module.name.clone()),
         }
     }
 }
@@ -48,12 +52,15 @@ impl From<Symbol> for L1Type {
                 name: l1_fn_declr.name,
                 args: l1_fn_declr.args.iter().map(|f| f.ty.clone()).collect(),
                 ret: l1_fn_declr.ret.into(),
+                extrn: true,
             },
             Symbol::Fn(l1_fn) => L1Type::Fn {
                 name: l1_fn.name.clone(),
                 args: l1_fn.args.iter().map(|f| f.ty.clone()).collect(),
                 ret: l1_fn.ret.clone().into(),
+                extrn: false,
             },
+            Symbol::Module(l1_module) => L1Type::Module(l1_module.name),
         }
     }
 }
@@ -65,6 +72,12 @@ impl L1Ast {
             symbols: HashMap::new(),
         }
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct L1Module {
+    pub name: String,
+    pub symbols: SymbolTable,
 }
 
 #[derive(Debug, Clone)]
@@ -94,6 +107,7 @@ pub enum L1Type {
     Bool,
     Str,
     Char,
+    Module(String),
     Struct(String),
     Enum(String),
     Arr(Box<L1Type>),
@@ -105,6 +119,7 @@ pub enum L1Type {
         name: String,
         args: Vec<L1Type>,
         ret: Box<L1Type>,
+        extrn: bool,
     },
     Ptr(Box<L1Type>),
     Interface {
@@ -179,11 +194,17 @@ impl ToString for L1Type {
             Bool => "bool".into(),
             Str => "str".into(),
             Char => "char".into(),
+            Module(m) => format!("L1_MODULE_{m}"),
             Struct(s) => s.into(),
             Enum(e) => e.into(),
             Arr(l1_type) => format!("L1ARRAY_{}", l1_type.to_string()),
             Variadic(l1_type) => format!("L1VARIADIC_{}", l1_type.to_string()),
-            Fn { name, args, ret: _ } => {
+            Fn {
+                name,
+                args,
+                ret: _,
+                extrn,
+            } => {
                 format!(
                     "L1FN_{name}_{}",
                     args.iter()
@@ -372,6 +393,7 @@ pub enum L1ExpressionInner {
     FnCall {
         name: String,
         args: Vec<L1NamedExpr>,
+        extrn: bool,
     },
     Variable(String),
     Field(String),

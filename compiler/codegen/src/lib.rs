@@ -1,7 +1,7 @@
 #![feature(box_patterns)]
 
 pub mod c;
-pub mod qbe;
+// pub mod qbe;
 
 pub trait Backend {
     fn generate(&mut self, ast: &ast::L1Ast) -> String;

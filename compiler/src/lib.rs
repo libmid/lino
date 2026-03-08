@@ -1,11 +1,13 @@
 #![feature(box_patterns)]
+#![feature(string_replace_in_place)]
 
 use std::fs::File;
 use std::io::Write;
 use std::path::PathBuf;
 
+use ast::L1Ast;
 use codegen::c::CBackend;
-use codegen::qbe::QbeBackend;
+// use codegen::qbe::QbeBackend;
 use codegen::{Backend, Codegen};
 use codespan_reporting::diagnostic::{Diagnostic, Label};
 use codespan_reporting::files::SimpleFiles;
@@ -16,24 +18,26 @@ use crate::analysis::backpatch::backpatch;
 use crate::analysis::inference::Inference;
 use crate::analysis::method;
 pub use crate::lexer::{Token, TokenKind};
-use crate::parser::imports::{process_imports, resolve_imports};
+use crate::parser::imports::process_imports;
 
 mod analysis;
 mod lexer;
 mod parser;
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 pub enum Target {
     Qbe,
     C,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct CompilerOptions {
     print_output_flag: bool,
     stdlib: Option<PathBuf>,
     output_file: PathBuf,
     target: Target,
+    pub write_to_file: bool,
+    pub module_name: String,
 }
 
 impl Default for CompilerOptions {
@@ -43,6 +47,8 @@ impl Default for CompilerOptions {
             stdlib: Default::default(),
             output_file: "build/out.ssa".into(),
             target: Target::C,
+            write_to_file: true,
+            module_name: String::from("main"),
         }
     }
 }
@@ -89,7 +95,7 @@ impl Compiler {
         }
     }
 
-    pub fn compile(&mut self) {
+    pub fn compile(&mut self) -> L1Ast {
         // Step 3.5: Verify the order of default args
         // Step 5: Reorder bin ops
         // Step 8: Type Checking
@@ -124,9 +130,11 @@ impl Compiler {
             l1p.get_ast(),
             self.input_file.clone(),
             self.options.stdlib.clone(),
+            self.options.clone(),
+            self.options.module_name.clone(),
         )
         .unwrap();
-        resolve_imports(l1p.get_ast());
+        // resolve_imports(l1p.get_ast());
 
         // dbg!(l1p.get_ast());
 
@@ -139,27 +147,36 @@ impl Compiler {
         let inference = Inference::new(l1p.get_ast());
         inference.infer_types(l1p.get_ast()).unwrap();
 
-        // dbg!(l1p.get_ast());
+        // if self.options.write_to_file {
+        //     dbg!(l1p.get_ast());
+        // }
 
         // Step 7.5: Patch method calls
         method::patch_method_calls(l1p.get_ast());
-        
+
         // dbg!(l1p.get_ast());
 
-        // Step 9: Codegen
-        let mut cg: Codegen<Box<dyn Backend>> = match self.options.target {
-            Target::Qbe => Codegen::new(Box::new(QbeBackend::new())),
-            Target::C => Codegen::new(Box::new(CBackend::new())),
-        };
+        if self.options.write_to_file {
+            // Step 9: Codegen
+            let mut cg: Codegen<Box<dyn Backend>> = match self.options.target {
+                Target::Qbe => {
+                    // Codegen::new(Box::new(QbeBackend::new()))
+                    unimplemented!()
+                }
+                Target::C => Codegen::new(Box::new(CBackend::new())),
+            };
 
-        let output = cg.generate(&l1p.get_ast());
+            let output = cg.generate(&l1p.get_ast());
 
-        if self.options.print_output_flag {
-            println!("{}", &output);
+            if self.options.print_output_flag {
+                println!("{}", &output);
+            }
+
+            let mut out = File::create(&self.options.output_file).unwrap();
+            out.write_all(output.as_bytes()).unwrap();
         }
 
-        let mut out = File::create(&self.options.output_file).unwrap();
-        out.write_all(output.as_bytes()).unwrap();
+        l1p.get_ast().clone()
     }
 
     fn error_tokens(&self, tokens: &Vec<Token>) {

@@ -20,6 +20,9 @@ pub fn backpatch_local_types(ast: &mut L1Ast) -> Result<(), BackpatchError> {
         let mut value = true;
         while value {
             match sym {
+                ast::Symbol::Module(_) => {
+                    // Modules dont need backpatch
+                }
                 ast::Symbol::Struct(l1_struct) => {
                     backpatch_struct(l1_struct, &mut sym_table, RECURSION_LIMIT)?;
                 }
@@ -235,11 +238,17 @@ fn needs_backpatch(ty: &L1Type) -> bool {
         | L1Type::Char
         | L1Type::Void
         | L1Type::Struct(_)
+        | L1Type::Module(_)
         | L1Type::Unknown => false,
 
         L1Type::Arr(ty) => needs_backpatch(ty),
         L1Type::Ptr(ty) => needs_backpatch(ty),
-        L1Type::Fn { name: _, args, ret } => {
+        L1Type::Fn {
+            name: _,
+            args,
+            ret,
+            extrn: _,
+        } => {
             for arg in args {
                 if needs_backpatch(&arg) {
                     return true;
