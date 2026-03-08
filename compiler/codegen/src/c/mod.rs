@@ -18,6 +18,8 @@ impl crate::Backend for CBackend {
     fn generate(&mut self, ast: &ast::L1Ast) -> String {
         self.module.push("#include <stdint.h>".into());
         self.module.push("#include <stdbool.h>".into());
+        self.module.push("#include <stddef.h>".into());
+        self.module.push("#include <sys/types.h>".into());
 
         self.generate_symbols(&ast.symbols);
 

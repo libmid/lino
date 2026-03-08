@@ -1,5 +1,24 @@
-def write(i32 fd,*char buf, i32 count) i32;
-def strlen(*char buf) i32;
-
-def malloc(u64 size) *void;
+def malloc(usize size) *void;
+def calloc(usize nmemb, usize size) *void;
+def realloc(*void ptr, usize size) *void;
 def free(*void ptr);
+
+def memcpy(*void dest, *void src, usize n) *void;
+def memmove(*void dest, *void src, usize n) *void;
+def memset(*void s, i32 c, usize n) *void;
+def memcmp(*void s1, *void s2, usize n) i32;
+
+def strlen(*char buf) usize;
+def strcpy(*char dest, *char src) *char;
+def strncpy(*char dest, *char src, usize n) *char;
+def strcmp(*char s1, *char s2) i32;
+def strncmp(*char s1, *char s2, usize n) i32;
+def strchr(*char s, i32 c) *char;
+def strstr(*char haystack, *char needle) *char;
+
+def open(*char pathname, i32 flags, i32 mode) i32;
+def close(i32 fd) i32;
+def read(i32 fd, *void buf, usize count) isize;
+def write(i32 fd, *char buf, usize count) isize;
+def lseek(i32 fd, isize offset, i32 whence) isize;
+def exit(i32 status);

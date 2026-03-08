@@ -227,10 +227,12 @@ fn needs_backpatch(ty: &L1Type) -> bool {
         | L1Type::U16
         | L1Type::U32
         | L1Type::U64
+        | L1Type::USize
         | L1Type::I8
         | L1Type::I16
         | L1Type::I32
         | L1Type::I64
+        | L1Type::ISize
         | L1Type::F32
         | L1Type::F64
         | L1Type::Bool

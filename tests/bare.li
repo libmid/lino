@@ -1,5 +1,6 @@
-import std.io;
+import std.libc;
 
-def main() {
-    io.print("Hello, World!\n");
+def main() i32 {
+    libc.write(1, "Hello World\n", 12);
+    return 0;
 }

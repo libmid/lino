@@ -98,10 +98,12 @@ pub enum L1Type {
     U16,
     U32,
     U64,
+    USize,
     I8,
     I16,
     I32,
     I64,
+    ISize,
     F32,
     F64,
     Bool,
@@ -137,8 +139,10 @@ pub enum L1Type {
 impl L1Type {
     pub fn allows_binop(lhs: &Self, rhs: &Self) -> Option<Self> {
         match lhs {
-            Ptr(_) | U64 | U32 | U16 | U8 | I64 | I32 | I16 | I8 => match rhs {
-                Ptr(_) | U64 | U32 | U16 | U8 | I64 | I32 | I16 | I8 => Some(lhs.clone()),
+            Ptr(_) | USize | U64 | U32 | U16 | U8 | ISize | I64 | I32 | I16 | I8 => match rhs {
+                Ptr(_) | USize | U64 | U32 | U16 | U8 | ISize | I64 | I32 | I16 | I8 => {
+                    Some(lhs.clone())
+                }
                 _ => None,
             },
             _ => None,
@@ -163,10 +167,12 @@ impl<'a> From<&'a str> for L1Type {
             "u16" => Self::U16,
             "u32" => Self::U32,
             "u64" => Self::U64,
+            "usize" => Self::USize,
             "i8" => Self::I8,
             "i16" => Self::I16,
             "i32" => Self::I32,
             "i64" => Self::I64,
+            "isize" => Self::ISize,
             "f32" => Self::F32,
             "f64" => Self::F64,
             "bool" => Self::Bool,
@@ -185,10 +191,12 @@ impl ToString for L1Type {
             U16 => "u16".into(),
             U32 => "u32".into(),
             U64 => "u64".into(),
+            USize => "usize".into(),
             I8 => "i8".into(),
             I16 => "i16".into(),
             I32 => "i32".into(),
             I64 => "i64".into(),
+            ISize => "isize".into(),
             F32 => "f32".into(),
             F64 => "f64".into(),
             Bool => "bool".into(),
